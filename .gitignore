@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# uv
+.uv/
+
+# Node / web
+node_modules/
+web/dist/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Spike artifacts
+spikes/**/manifest.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
