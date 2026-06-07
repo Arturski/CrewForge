@@ -32,13 +32,46 @@ turns into **live CrewAI objects** (to run) and an **exported CrewAI project** (
 Python 3.12 · FastAPI · Postgres · React + TypeScript + Vite · shadcn/ui + Tailwind · XyFlow ·
 containerized run workers.
 
-## Development
+## Quickstart (preview)
 
 ```bash
-# spikes (proofs of the core architecture)
+# 1. backend deps (Python 3.12 pinned via uv)
+uv sync
+
+# 2. build the web UI
+npm --prefix web install && npm --prefix web run build
+
+# 3. run — serves API + UI on one port
+uv run uvicorn server.app:app --port 8765
+# open http://localhost:8765
+```
+
+No API key needed: runs default to **dry-run** mode using a built-in mock LLM, so you
+can build a crew, run it, and watch live events stream in immediately.
+
+### Dev mode (hot reload)
+
+```bash
+# terminal 1 — API
+uv run uvicorn server.app:app --reload --port 8765
+# terminal 2 — Vite dev server (proxies /api -> :8765)
+npm --prefix web run dev          # http://localhost:5180
+```
+
+## What's here (P0)
+
+- **Compatibility engine** — `server/compiler/manifest.py` introspects crewai → 136 fields; the UI renders forms from it.
+- **Adapter + run loop** — `server/compiler/adapter.py` + `server/runner.py`: spec → `Crew` → `kickoff()` with a `BaseEventListener` capturing the lifecycle; HITL via guardrail gate.
+- **Control plane** — `server/app.py` (FastAPI): manifest, workspaces, runs, SSE event stream, SPA host.
+- **UI** — `web/` (React 19 + Vite + Tailwind v4): Dashboard, Builder (manifest-driven Agent form), Runs (live SSE timeline).
+
+## Spikes (architecture proofs)
+
+```bash
 uv run python spikes/spike_a_manifest/introspect.py   # compatibility engine
 uv run python spikes/spike_b_runloop/run.py           # run loop + events + HITL
 ```
+See [`spikes/SPIKE_FINDINGS.md`](spikes/SPIKE_FINDINGS.md).
 
 ## License
 
