@@ -129,7 +129,7 @@ export function Builder() {
         </div>
         <div className="flex items-center gap-2">
           <Link to="/models" title="Configure the model">
-            <Badge tone={dryRun ? "warn" : "ok"}>{dryRun ? "dry-run" : (llm?.model || "no model")}</Badge>
+            <Badge tone={dryRun ? "warn" : "ok"}>{dryRun ? "dry-run" : (llm?.model ? llm.model.split("/").pop() : "no model")}</Badge>
           </Link>
           <div className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1">
             <span className="text-xs text-muted">Dry run</span>

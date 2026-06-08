@@ -1,36 +1,49 @@
 import { useEffect, useState } from "react";
 import { api, type LlmSettings } from "../lib/api";
-import { Badge, Button, Card, CardHeader, Input, LabeledField } from "../components/ui";
+import { Badge, Button, Card, CardHeader, Input, LabeledField, Select } from "../components/ui";
 import { useToast } from "../lib/toast";
 
-// Provider presets. `model` strings are LiteLLM-style (provider/model); CrewAI
-// routes them automatically. OpenAI-compatible providers (MiniMax, custom) use
-// the `openai/<model>` prefix against a base_url.
+// Providers present FRIENDLY model names; the LiteLLM wire string (e.g.
+// "openai/MiniMax-M1") is what we store/send but is shown only as a small
+// transparency note — never as the primary label.
+type Model = { label: string; value: string };
 type Provider = {
-  id: string; label: string; models: string[]; baseUrl: string;
-  needsKey: boolean; keyHelp: string;
+  id: string; label: string; models: Model[]; baseUrl: string;
+  custom?: boolean; needsKey: boolean; keyHelp: string;
 };
+
 const PROVIDERS: Provider[] = [
-  { id: "openai", label: "OpenAI", models: ["openai/gpt-4o-mini", "openai/gpt-4o", "openai/o3-mini"], baseUrl: "", needsKey: true, keyHelp: "platform.openai.com → API keys" },
-  { id: "anthropic", label: "Anthropic", models: ["anthropic/claude-3-5-sonnet-latest", "anthropic/claude-3-5-haiku-latest"], baseUrl: "", needsKey: true, keyHelp: "console.anthropic.com → API keys" },
-  { id: "minimax", label: "MiniMax", models: ["openai/MiniMax-M1", "openai/MiniMax-Text-01", "openai/abab6.5s-chat"], baseUrl: "https://api.minimax.io/v1", needsKey: true, keyHelp: "MiniMax platform → API key (uses the OpenAI-compatible endpoint)" },
-  { id: "gemini", label: "Google Gemini", models: ["gemini/gemini-1.5-pro", "gemini/gemini-1.5-flash"], baseUrl: "", needsKey: true, keyHelp: "aistudio.google.com → API key" },
-  { id: "groq", label: "Groq", models: ["groq/llama-3.3-70b-versatile"], baseUrl: "", needsKey: true, keyHelp: "console.groq.com → API keys" },
-  { id: "ollama", label: "Ollama (local)", models: ["ollama/llama3.1", "ollama/qwen2.5"], baseUrl: "http://localhost:11434", needsKey: false, keyHelp: "No key needed — runs locally" },
-  { id: "custom", label: "Custom (OpenAI-compatible)", models: ["openai/your-model"], baseUrl: "https://your-endpoint/v1", needsKey: true, keyHelp: "Any OpenAI-compatible endpoint (vLLM, LM Studio, proxy…)" },
+  { id: "openai", label: "OpenAI", baseUrl: "", needsKey: true, keyHelp: "platform.openai.com → API keys",
+    models: [{ label: "GPT-4o mini", value: "openai/gpt-4o-mini" }, { label: "GPT-4o", value: "openai/gpt-4o" }, { label: "o3-mini", value: "openai/o3-mini" }] },
+  { id: "anthropic", label: "Anthropic", baseUrl: "", needsKey: true, keyHelp: "console.anthropic.com → API keys",
+    models: [{ label: "Claude 3.5 Sonnet", value: "anthropic/claude-3-5-sonnet-latest" }, { label: "Claude 3.5 Haiku", value: "anthropic/claude-3-5-haiku-latest" }] },
+  { id: "minimax", label: "MiniMax", baseUrl: "https://api.minimax.io/v1", needsKey: true, keyHelp: "MiniMax platform → API key",
+    models: [{ label: "MiniMax-M1", value: "openai/MiniMax-M1" }, { label: "MiniMax-Text-01", value: "openai/MiniMax-Text-01" }, { label: "abab6.5s-chat", value: "openai/abab6.5s-chat" }] },
+  { id: "gemini", label: "Google Gemini", baseUrl: "", needsKey: true, keyHelp: "aistudio.google.com → API key",
+    models: [{ label: "Gemini 1.5 Pro", value: "gemini/gemini-1.5-pro" }, { label: "Gemini 1.5 Flash", value: "gemini/gemini-1.5-flash" }] },
+  { id: "groq", label: "Groq", baseUrl: "", needsKey: true, keyHelp: "console.groq.com → API keys",
+    models: [{ label: "Llama 3.3 70B", value: "groq/llama-3.3-70b-versatile" }] },
+  { id: "ollama", label: "Ollama (local)", baseUrl: "http://localhost:11434", needsKey: false, keyHelp: "No key needed — runs locally",
+    models: [{ label: "Llama 3.1", value: "ollama/llama3.1" }, { label: "Qwen 2.5", value: "ollama/qwen2.5" }] },
+  { id: "custom", label: "Custom", baseUrl: "https://your-endpoint/v1", custom: true, needsKey: true,
+    keyHelp: "Any OpenAI-compatible endpoint (vLLM, LM Studio, a proxy…). Enter the full model id.",
+    models: [] },
 ];
 
-function providerForModel(model: string): Provider {
-  return PROVIDERS.find((p) => p.models.includes(model))
-    ?? PROVIDERS.find((p) => model.startsWith(p.id))
-    ?? PROVIDERS[0];
+function providerForModel(value: string): Provider {
+  return PROVIDERS.find((p) => p.models.some((m) => m.value === value))
+    ?? PROVIDERS.find((p) => !p.custom && value.startsWith(p.id))
+    ?? PROVIDERS.find((p) => p.custom)!;
+}
+function labelFor(p: Provider, value: string): string {
+  return p.models.find((m) => m.value === value)?.label ?? value;
 }
 
 export function Settings() {
   const toast = useToast();
   const [cfg, setCfg] = useState<LlmSettings | null>(null);
   const [provider, setProvider] = useState<Provider>(PROVIDERS[0]);
-  const [model, setModel] = useState(PROVIDERS[0].models[0]);
+  const [model, setModel] = useState(PROVIDERS[0].models[0].value); // wire string
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [temperature, setTemperature] = useState("");
@@ -42,8 +55,7 @@ export function Settings() {
       setCfg(c);
       if (c.model) {
         const p = providerForModel(c.model);
-        setProvider(p); setModel(c.model);
-        setBaseUrl(c.base_url || p.baseUrl);
+        setProvider(p); setModel(c.model); setBaseUrl(c.base_url || p.baseUrl);
       }
       setTemperature(c.temperature == null ? "" : String(c.temperature));
     }).catch(() => {});
@@ -51,7 +63,7 @@ export function Settings() {
 
   function pickProvider(p: Provider) {
     setProvider(p);
-    setModel(p.models[0]);
+    setModel(p.custom ? "" : p.models[0].value);
     setBaseUrl(p.baseUrl);
     setTest(null);
   }
@@ -71,16 +83,18 @@ export function Settings() {
       await api.saveLlm({ model, base_url: baseUrl, temperature: temperature === "" ? undefined : Number(temperature), ...(apiKey ? { api_key: apiKey } : {}) });
       setApiKey("");
       setCfg(await api.getLlm());
-      toast("Saved", "ok");
+      toast(`Saved — ${provider.label} · ${labelFor(provider, model)}`, "ok");
     } catch (e) { toast(String(e), "error"); }
     finally { setBusy(false); }
   }
+
+  const showBaseUrl = provider.custom || provider.id === "minimax" || provider.id === "ollama" || !!baseUrl;
 
   return (
     <div className="max-w-2xl space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-ink">Models</h1>
-        <p className="text-sm text-muted">The LLM that powers your agents. Dry-run works with no key; live runs use this. Three steps: pick a provider → choose a model → add your key.</p>
+        <p className="text-sm text-muted">The LLM that powers your agents. Dry-run works with no key; live runs use this. Pick a provider → choose a model → add your key.</p>
       </div>
 
       <Card>
@@ -99,12 +113,23 @@ export function Settings() {
         <CardHeader title="2 · Model & key"
           right={cfg?.configured ? <Badge tone="ok">configured</Badge> : <Badge tone="warn">dry-run only</Badge>} />
         <div className="space-y-4 p-5">
-          <LabeledField label="Model" tip="The exact model id. The presets for this provider are suggestions — you can type any supported id.">
-            <Input list="models" value={model} onChange={(e) => setModel(e.target.value)} placeholder={provider.models[0]} />
-            <datalist id="models">{provider.models.map((m) => <option key={m} value={m} />)}</datalist>
+          <LabeledField label="Model" tip="The model that runs your agents. Pick one for this provider.">
+            {provider.custom ? (
+              <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="openai/your-model" />
+            ) : (
+              <Select value={model} onChange={(e) => setModel(e.target.value)}>
+                {provider.models.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </Select>
+            )}
+            {model && (
+              <p className="mt-1 text-[11px] text-muted">
+                Sent to the API as <code className="rounded bg-elevated2 px-1 py-0.5 text-ink">{model}</code>
+                {showBaseUrl && baseUrl ? <> · base <code className="rounded bg-elevated2 px-1 py-0.5 text-ink">{baseUrl}</code></> : null}
+              </p>
+            )}
           </LabeledField>
 
-          {(provider.id === "minimax" || provider.id === "ollama" || provider.id === "custom" || baseUrl) && (
+          {showBaseUrl && (
             <LabeledField label="Base URL" tip="The provider endpoint. Pre-filled for this provider; change it for a proxy or self-host.">
               <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={provider.baseUrl} />
             </LabeledField>
