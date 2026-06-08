@@ -1,31 +1,23 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { Toaster, toast } from "sonner";
 
-type Toast = { id: number; msg: string; tone: "ok" | "error" | "info" };
-const Ctx = createContext<(msg: string, tone?: Toast["tone"]) => void>(() => {});
+// Same API as before (useToast()(msg, tone) + <ToastProvider>), backed by sonner.
+type Tone = "ok" | "error" | "info";
 
 export function useToast() {
-  return useContext(Ctx);
+  return (msg: string, tone: Tone = "info") => {
+    if (tone === "ok") toast.success(msg);
+    else if (tone === "error") toast.error(msg);
+    else toast(msg);
+  };
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((msg: string, tone: Toast["tone"] = "info") => {
-    const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, msg, tone }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
-  }, []);
-
-  const color = { ok: "border-ok/40 text-ok", error: "border-danger/40 text-danger", info: "border-border text-ink" };
   return (
-    <Ctx.Provider value={push}>
+    <>
       {children}
-      <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2">
-        {toasts.map((t) => (
-          <div key={t.id} className={`rounded-lg border bg-elevated2 px-4 py-2.5 text-sm shadow-lg ${color[t.tone]}`}>
-            {t.msg}
-          </div>
-        ))}
-      </div>
-    </Ctx.Provider>
+      <Toaster theme="dark" position="bottom-right" richColors closeButton
+        toastOptions={{ style: { background: "var(--color-elevated2)", border: "1px solid var(--color-border)", color: "var(--color-ink)" } }} />
+    </>
   );
 }

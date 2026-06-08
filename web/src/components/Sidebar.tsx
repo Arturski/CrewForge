@@ -1,12 +1,13 @@
 import { NavLink } from "react-router-dom";
+import { LayoutGrid, Workflow, Play, Puzzle, Plug, Sparkles, type LucideIcon } from "lucide-react";
 
-const NAV = [
-  { to: "/", label: "Workflows", icon: "◆", end: true },
-  { to: "/builder", label: "Builder", icon: "⚙" },
-  { to: "/runs", label: "Runs", icon: "▶" },
-  { to: "/skills", label: "Skills", icon: "🧩" },
-  { to: "/mcp", label: "MCP", icon: "🔌" },
-  { to: "/models", label: "Models", icon: "✦" },
+const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
+  { to: "/", label: "Workflows", icon: LayoutGrid, end: true },
+  { to: "/builder", label: "Builder", icon: Workflow },
+  { to: "/runs", label: "Runs", icon: Play },
+  { to: "/skills", label: "Skills", icon: Puzzle },
+  { to: "/mcp", label: "MCP", icon: Plug },
+  { to: "/models", label: "Models", icon: Sparkles },
 ];
 
 export function Sidebar({ crewaiVersion }: { crewaiVersion?: string }) {
@@ -31,7 +32,7 @@ export function Sidebar({ crewaiVersion }: { crewaiVersion?: string }) {
               }`
             }
           >
-            <span className="w-4 text-center">{n.icon}</span>
+            <n.icon className="h-4 w-4" />
             {n.label}
           </NavLink>
         ))}
