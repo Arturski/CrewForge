@@ -78,7 +78,8 @@ class RunManager:
             kwargs["temperature"] = cfg["temperature"]
         return LLM(**kwargs), False
 
-    def start(self, spec: dict[str, Any], *, dry_run: bool = True) -> str:
+    def start(self, spec: dict[str, Any], *, dry_run: bool = True,
+              inputs: dict[str, Any] | None = None) -> str:
         run_id = uuid.uuid4().hex[:12]
         rec = {
             "id": run_id,
@@ -92,15 +93,17 @@ class RunManager:
             "result": None,
             "error": None,
             "tokens": 0,
+            "inputs": inputs or {},
             "_lock": threading.Lock(),
         }
         self.runs[run_id] = rec
         store.create_run(self._public(rec))
-        threading.Thread(target=self._execute, args=(run_id, spec, dry_run),
+        threading.Thread(target=self._execute, args=(run_id, spec, dry_run, inputs or {}),
                          daemon=True).start()
         return run_id
 
-    def _execute(self, run_id: str, spec: dict[str, Any], dry_run: bool) -> None:
+    def _execute(self, run_id: str, spec: dict[str, Any], dry_run: bool,
+                 inputs: dict[str, Any]) -> None:
         rec = self.runs[run_id]
 
         def emit(kind: str, **fields: Any) -> None:
@@ -164,7 +167,7 @@ class RunManager:
 
                 emit("run.started", crew=spec.get("name"),
                      mode="dry-run" if effective_dry else "live")
-                result = crew.kickoff()
+                result = crew.kickoff(inputs=inputs) if inputs else crew.kickoff()
                 rec["result"] = str(getattr(result, "raw", result))[:4000]
             rec["status"] = "succeeded"
             emit("run.finished", status="succeeded", tokens=rec["tokens"] or None)

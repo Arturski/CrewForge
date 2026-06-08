@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Code2, Download, Play, Plus, Trash2 } from "lucide-react";
 import {
-  api, type AgentSpec, type Manifest, type TaskSpec, type ToolInfo, type Workspace,
+  api, type AgentSpec, type LlmSettings, type Manifest, type TaskSpec, type ToolInfo, type Workspace,
 } from "../lib/api";
 import {
-  Badge, Button, Card, CardHeader, Input, LabeledField, Select, Textarea, Toggle, Tooltip,
+  Badge, Button, Card, CardHeader, Input, LabeledField, Modal, Select, Textarea, Toggle, Tooltip,
 } from "../components/ui";
 import { DynamicForm } from "../components/DynamicForm";
 import { CrewCanvas } from "../components/CrewCanvas";
@@ -26,10 +27,14 @@ export function Builder() {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [llm, setLlm] = useState<LlmSettings | null>(null);
+  const [dryRun, setDryRun] = useState(true);
+  const [inputsOpen, setInputsOpen] = useState(false);
 
   useEffect(() => {
     api.manifest().then(setManifest).catch(() => {});
     api.tools().then((d) => setTools(d.tools)).catch(() => {});
+    api.getLlm().then((c) => { setLlm(c); setDryRun(!c.configured); }).catch(() => {});
   }, []);
   // No dead-end: if no workspace in the URL, open the last-used (or first) one.
   useEffect(() => {
@@ -80,13 +85,17 @@ export function Builder() {
     catch (e) { toast(String(e), "error"); }
     finally { setBusy(false); }
   }
-  async function run(dry: boolean) {
+  async function doRun(inputs: Record<string, string>) {
     if (!ws) return;
     if (dirty) await save();
     try {
-      const { run_id } = await api.startRun(ws.id, dry);
+      const { run_id } = await api.startRun(ws.id, dryRun, inputs);
       navigate(`/runs?run=${run_id}`);
     } catch (e) { toast(String(e), "error"); }
+  }
+  function onRun() {
+    if (ws?.inputs?.length) setInputsOpen(true);
+    else doRun({});
   }
 
   if (!wsId) return <Empty />;
@@ -116,15 +125,36 @@ export function Builder() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={() => window.open(api.exportUrl(ws.id), "_blank")}>⬇ Export</Button>
-          <Button variant="ghost" onClick={() => navigate(`/code?ws=${ws.id}`)}>{"</>"} Code</Button>
+          <Link to="/models" title="Configure the model">
+            <Badge tone={dryRun ? "warn" : "ok"}>{dryRun ? "dry-run" : (llm?.model || "no model")}</Badge>
+          </Link>
+          <div className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1">
+            <span className="text-xs text-muted">Dry run</span>
+            <Toggle checked={dryRun} onChange={setDryRun} />
+          </div>
+          <Button variant="ghost" size="icon" onClick={() => window.open(api.exportUrl(ws.id), "_blank")} title="Export project"><Download className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => navigate(`/code?ws=${ws.id}`)} title="View code"><Code2 className="h-4 w-4" /></Button>
           <Button variant="ghost" onClick={save} disabled={busy || !dirty}>Save</Button>
-          <Button variant="ghost" onClick={() => run(false)}>▶ Run live</Button>
-          <Button onClick={() => run(true)}>▶ Run (dry)</Button>
+          <Button onClick={onRun}><Play className="h-4 w-4" /> Run</Button>
         </div>
       </div>
 
-      <Card className="overflow-hidden"><CrewCanvas ws={ws} activeAgent={agent?.role} /></Card>
+      <Card className="overflow-hidden">
+        <CrewCanvas
+          ws={ws}
+          sel={sel}
+          onSelect={setSel}
+          onAddAgent={addAgent}
+          onAddTask={addTask}
+          onDelete={(s) => {
+            if (!s) return;
+            if (s.kind === "agent") mutate((w) => { w.agents.splice(s.idx, 1); });
+            else mutate((w) => { w.tasks.splice(s.idx, 1); });
+            setSel(null);
+          }}
+          onMove={(nodeId, x, y) => mutate((w) => { w.layout = { ...(w.layout ?? {}), [nodeId]: { x, y } }; })}
+        />
+      </Card>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[260px_1fr]">
         {/* lists */}
@@ -134,6 +164,21 @@ export function Builder() {
             <div className="p-4">
               <SkillPicker all={tools} value={ws.skills ?? []} onChange={(v) => mutate((w) => { w.skills = v; })} />
               <p className="mt-2 text-xs text-muted">Add more under <Link to="/mcp" className="text-brand hover:underline">MCP</Link>.</p>
+            </div>
+          </Card>
+          <Card>
+            <CardHeader title="Run inputs" sub="Variables you fill in at run time. Reference as {name} in tasks." />
+            <div className="space-y-2 p-4">
+              {(ws.inputs ?? []).map((inp, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Input className="flex-1" placeholder="topic" value={inp.name}
+                    onChange={(e) => mutate((w) => { w.inputs![i] = { ...w.inputs![i], name: e.target.value }; })} />
+                  <button onClick={() => mutate((w) => { w.inputs!.splice(i, 1); })}
+                    className="text-muted hover:text-danger" aria-label="Remove input"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+              <button onClick={() => mutate((w) => { w.inputs = [...(w.inputs ?? []), { name: "" }]; })}
+                className="inline-flex items-center gap-1 text-sm text-brand hover:underline"><Plus className="h-3 w-3" /> Add input</button>
             </div>
           </Card>
           <Card>
@@ -240,7 +285,35 @@ export function Builder() {
           )}
         </Card>
       </div>
+      {inputsOpen && ws.inputs && ws.inputs.length > 0 && (
+        <InputsDialog inputs={ws.inputs} onClose={() => setInputsOpen(false)}
+          onSubmit={(vals) => { setInputsOpen(false); doRun(vals); }} />
+      )}
     </div>
+  );
+}
+
+function InputsDialog({ inputs, onClose, onSubmit }: {
+  inputs: { name: string; description?: string; default?: string }[];
+  onClose: () => void; onSubmit: (vals: Record<string, string>) => void;
+}) {
+  const [vals, setVals] = useState<Record<string, string>>(
+    Object.fromEntries(inputs.filter((i) => i.name).map((i) => [i.name, i.default ?? ""])),
+  );
+  return (
+    <Modal title="Run inputs" onClose={onClose}>
+      <div className="space-y-4">
+        {inputs.filter((i) => i.name).map((i) => (
+          <LabeledField key={i.name} label={i.name} tip={i.description}>
+            <Input value={vals[i.name] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [i.name]: e.target.value }))} />
+          </LabeledField>
+        ))}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onSubmit(vals)}><Play className="h-4 w-4" /> Run</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

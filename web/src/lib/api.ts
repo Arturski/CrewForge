@@ -35,6 +35,8 @@ export interface Workspace {
   id: string; name: string; description: string; process: string;
   agents: AgentSpec[]; tasks: TaskSpec[];
   skills?: string[]; // workflow-level skills, shared by all agents
+  layout?: Record<string, { x: number; y: number }>; // canvas node positions
+  inputs?: { name: string; description?: string; default?: string }[]; // run-time params
 }
 
 export interface RunEvent {
@@ -118,8 +120,8 @@ export const api = {
   rescanMcp: (id: string) => req<McpServer>(`/api/mcp/${id}/rescan`, { method: "POST" }),
   deleteMcp: (id: string) => req<{ ok: boolean }>(`/api/mcp/${id}`, { method: "DELETE" }),
 
-  startRun: (workspace_id: string, dry_run = true) =>
-    req<{ run_id: string }>("/api/runs", json("POST", { workspace_id, dry_run })),
+  startRun: (workspace_id: string, dry_run = true, inputs: Record<string, string> = {}) =>
+    req<{ run_id: string }>("/api/runs", json("POST", { workspace_id, dry_run, inputs })),
   runs: () => req<{ runs: RunRecord[] }>("/api/runs"),
   run: (id: string) => req<RunRecord>(`/api/runs/${id}`),
 };

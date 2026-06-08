@@ -207,7 +207,7 @@ async def start_run(req: Request) -> dict[str, Any]:
         raise HTTPException(404, "workspace not found")
     if not ws.get("agents") or not ws.get("tasks"):
         raise HTTPException(400, "workspace needs at least one agent and one task")
-    run_id = runs.start(ws, dry_run=body.get("dry_run", True))
+    run_id = runs.start(ws, dry_run=body.get("dry_run", True), inputs=body.get("inputs") or {})
     return {"run_id": run_id, "workspace_id": ws["id"]}
 
 
