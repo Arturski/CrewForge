@@ -60,6 +60,14 @@ export interface LlmSettings {
   temperature: number | null; api_key_set: boolean;
 }
 
+export interface Persona {
+  id: string; name: string; role: string; goal: string; backstory: string;
+  tags: string[]; suggested_tools: string[];
+}
+export interface TemplateSummary {
+  id: string; name: string; description: string; agents: number; tasks: number;
+}
+
 export interface ToolInfo {
   name: string; description: string;
   kind?: "builtin" | "mcp"; server?: string; server_id?: string; risk?: string;
@@ -106,7 +114,10 @@ export const api = {
 
   workspaces: () => req<{ workspaces: WorkspaceSummary[] }>("/api/workspaces"),
   workspace: (id: string) => req<Workspace>(`/api/workspaces/${id}`),
-  createWorkspace: (name: string) => req<Workspace>("/api/workspaces", json("POST", { name })),
+  createWorkspace: (name: string, template?: string) =>
+    req<Workspace>("/api/workspaces", json("POST", { name, ...(template ? { template } : {}) })),
+  personas: () => req<{ personas: Persona[] }>("/api/personas"),
+  templates: () => req<{ templates: TemplateSummary[] }>("/api/templates"),
   saveWorkspace: (ws: Workspace) => req<Workspace>(`/api/workspaces/${ws.id}`, json("PUT", ws)),
   deleteWorkspace: (id: string) => req<{ ok: boolean }>(`/api/workspaces/${id}`, { method: "DELETE" }),
   code: (id: string) => req<{ files: Record<string, string> }>(`/api/workspaces/${id}/code`),

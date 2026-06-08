@@ -12,7 +12,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import mcp, registry, store
+import copy
+
+from . import mcp, personas as personas_mod, registry, store, templates as templates_mod
 from .compiler.exporter import export_files, export_zip
 from .compiler.manifest import build_manifest
 from .compiler.tools import tool_catalog
@@ -45,6 +47,20 @@ def manifest() -> dict[str, Any]:
 @app.get("/api/tools")
 def tools() -> dict[str, Any]:
     return {"tools": tool_catalog() + mcp.mcp_tool_catalog()}
+
+
+@app.get("/api/personas")
+def personas() -> dict[str, Any]:
+    return {"personas": personas_mod.PERSONAS}
+
+
+@app.get("/api/templates")
+def templates() -> dict[str, Any]:
+    return {"templates": [
+        {"id": t["id"], "name": t["name"], "description": t["description"],
+         "agents": len(t["spec"]["agents"]), "tasks": len(t["spec"]["tasks"])}
+        for t in templates_mod.TEMPLATES
+    ]}
 
 
 # ---- Skill marketplace (official MCP registry) -----------------------------
@@ -143,15 +159,22 @@ def list_workspaces() -> dict[str, Any]:
 @app.post("/api/workspaces")
 async def create_workspace(req: Request) -> dict[str, Any]:
     body = await req.json() if await req.body() else {}
-    name = body.get("name", "Untitled Crew")
-    ws = {
-        "id": f"ws-{uuid.uuid4().hex[:8]}",
-        "name": name,
-        "description": body.get("description", ""),
-        "process": "sequential",
-        "agents": [],
-        "tasks": [],
-    }
+    ws_id = f"ws-{uuid.uuid4().hex[:8]}"
+    template = templates_mod.get_template(body["template"]) if body.get("template") else None
+    if template:
+        ws = copy.deepcopy(template["spec"])
+        ws["id"] = ws_id
+        ws["name"] = body.get("name") or template["name"]
+        ws.setdefault("description", template["description"])
+    else:
+        ws = {
+            "id": ws_id,
+            "name": body.get("name", "Untitled Crew"),
+            "description": body.get("description", ""),
+            "process": "sequential",
+            "agents": [],
+            "tasks": [],
+        }
     return store.save_workspace(ws)
 
 

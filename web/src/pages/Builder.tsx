@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Code2, Download, Play, Plus, Trash2 } from "lucide-react";
 import {
-  api, type AgentSpec, type LlmSettings, type Manifest, type TaskSpec, type ToolInfo, type Workspace,
+  api, type AgentSpec, type LlmSettings, type Manifest, type Persona, type TaskSpec, type ToolInfo, type Workspace,
 } from "../lib/api";
 import {
   Badge, Button, Card, CardHeader, Input, LabeledField, Modal, Select, Textarea, Toggle, Tooltip,
@@ -30,11 +30,14 @@ export function Builder() {
   const [llm, setLlm] = useState<LlmSettings | null>(null);
   const [dryRun, setDryRun] = useState(true);
   const [inputsOpen, setInputsOpen] = useState(false);
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [personaOpen, setPersonaOpen] = useState(false);
 
   useEffect(() => {
     api.manifest().then(setManifest).catch(() => {});
     api.tools().then((d) => setTools(d.tools)).catch(() => {});
     api.getLlm().then((c) => { setLlm(c); setDryRun(!c.configured); }).catch(() => {});
+    api.personas().then((d) => setPersonas(d.personas)).catch(() => {});
   }, []);
   // No dead-end: if no workspace in the URL, open the last-used (or first) one.
   useEffect(() => {
@@ -222,7 +225,8 @@ export function Builder() {
           {agent && (
             <>
               <CardHeader title={`Agent: ${agent.role || "Untitled"}`}
-                sub="Describe the agent in plain language. Hover any ? for help." />
+                sub="Describe the agent in plain language. Hover any ? for help."
+                right={<Button variant="ghost" size="sm" onClick={() => setPersonaOpen(true)}>✨ Start from persona</Button>} />
               <div className="space-y-4 p-5">
                 <LabeledField label="Role" tip="A short title for what this agent is, e.g. 'Senior Researcher'. Shapes how it behaves.">
                   <Input value={agent.role} onChange={(e) => mutate((w) => { (w.agents[sel!.idx]).role = e.target.value; })} />
@@ -324,6 +328,17 @@ export function Builder() {
         <InputsDialog inputs={ws.inputs} onClose={() => setInputsOpen(false)}
           onSubmit={(vals) => { setInputsOpen(false); doRun(vals); }} />
       )}
+      {personaOpen && sel?.kind === "agent" && (
+        <PersonaModal personas={personas} onClose={() => setPersonaOpen(false)}
+          onPick={(p) => {
+            mutate((w) => {
+              const a = w.agents[sel.idx];
+              a.role = p.role; a.goal = p.goal; a.backstory = p.backstory;
+              a.tools = Array.from(new Set([...(a.tools ?? []), ...p.suggested_tools]));
+            });
+            setPersonaOpen(false);
+          }} />
+      )}
     </div>
   );
 }
@@ -347,6 +362,28 @@ function InputsDialog({ inputs, onClose, onSubmit }: {
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button onClick={() => onSubmit(vals)}><Play className="h-4 w-4" /> Run</Button>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+function PersonaModal({ personas, onClose, onPick }: {
+  personas: Persona[]; onClose: () => void; onPick: (p: Persona) => void;
+}) {
+  return (
+    <Modal title="Start from a persona" onClose={onClose}>
+      <div className="max-h-[60vh] space-y-2 overflow-y-auto">
+        <p className="text-xs text-muted">Pick a detailed, ready-made persona — it fills this agent's role, goal, backstory, and suggested tools.</p>
+        {personas.map((p) => (
+          <button key={p.id} onClick={() => onPick(p)}
+            className="block w-full rounded-lg border border-border bg-canvas p-3 text-left transition hover:border-brand">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-ink">{p.name}</span>
+              {p.tags.map((t) => <Badge key={t} tone="muted">{t}</Badge>)}
+            </div>
+            <div className="mt-1 line-clamp-2 text-xs text-muted">{p.backstory}</div>
+          </button>
+        ))}
       </div>
     </Modal>
   );

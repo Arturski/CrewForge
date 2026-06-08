@@ -1,40 +1,35 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type Manifest, type WorkspaceSummary } from "../lib/api";
+import {
+  api, type LlmSettings, type TemplateSummary, type WorkspaceSummary,
+} from "../lib/api";
 import { Button, Card, CardHeader, Input, Modal, Pill } from "../components/ui";
 import { useToast } from "../lib/toast";
+import { FileStack, Plus } from "lucide-react";
 
 export function Dashboard() {
   const navigate = useNavigate();
   const toast = useToast();
-  const [manifest, setManifest] = useState<Manifest | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [llm, setLlm] = useState<LlmSettings | null>(null);
+  const [runCount, setRunCount] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
 
   function load() {
     api.workspaces().then((d) => setWorkspaces(d.workspaces)).catch(() => {});
   }
   useEffect(() => {
-    api.manifest().then(setManifest).catch(() => {});
     load();
+    api.templates().then((d) => setTemplates(d.templates)).catch(() => {});
+    api.getLlm().then(setLlm).catch(() => {});
+    api.runs().then((d) => setRunCount(d.runs.length)).catch(() => {});
   }, []);
 
-  async function create() {
-    try {
-      const ws = await api.createWorkspace(name || "Untitled Crew");
-      setCreating(false); setName("");
-      navigate(`/builder?ws=${ws.id}`);
-    } catch (e) { toast(String(e), "error"); }
-  }
   async function remove(id: string) {
     if (!confirm("Delete this workflow?")) return;
-    await api.deleteWorkspace(id);
-    toast("Deleted", "ok");
-    load();
+    await api.deleteWorkspace(id); toast("Deleted", "ok"); load();
   }
-
-  const total = manifest ? Object.values(manifest.counts).reduce((a, b) => a + b, 0) : 0;
 
   return (
     <div className="space-y-6">
@@ -43,18 +38,18 @@ export function Dashboard() {
           <h1 className="text-xl font-semibold text-ink">Your workflows</h1>
           <p className="text-sm text-muted">Design, run, and observe CrewAI agent workflows — no code.</p>
         </div>
-        <Button onClick={() => setCreating(true)}>+ New workflow</Button>
+        <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New workflow</Button>
       </div>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat label="workflows" value={String(workspaces.length)} tone="brand" />
-        <Stat label="crewai" value={manifest?.crewai_version ?? "…"} tone="ink" />
-        <Stat label="fields auto-mapped" value={total ? String(total) : "…"} tone="ok" />
-        <Stat label="hardcoded fields" value="0" tone="ok" />
+        <Stat label="active model" value={llm?.configured ? (llm.model || "set") : "dry-run"} tone={llm?.configured ? "ok" : "muted"} />
+        <Stat label="total runs" value={runCount == null ? "…" : String(runCount)} tone="ink" />
+        <Stat label="crewai" value="1.14.6" tone="ink" />
       </div>
 
       <Card>
-        <CardHeader title="Workflows" sub="Open one to edit agents, tasks, and rules — then run it." />
+        <CardHeader title="Workflows" sub="Open one to edit agents, tasks, and tools — then run it." />
         <div className="divide-y divide-border">
           {workspaces.map((w) => (
             <div key={w.id} className="group flex items-center justify-between gap-4 px-4 py-3">
@@ -72,34 +67,58 @@ export function Dashboard() {
           ))}
           {!workspaces.length && (
             <div className="px-4 py-10 text-center text-sm text-muted">
-              No workflows yet. Click <span className="text-brand">+ New workflow</span> to start.
+              No workflows yet. Click <span className="text-brand">+ New workflow</span> to start from a template or blank.
             </div>
           )}
         </div>
       </Card>
 
-      {creating && (
-        <Modal title="New workflow" onClose={() => setCreating(false)}>
-          <div className="space-y-4">
-            <Input autoFocus placeholder="e.g. Research & Summarize" value={name}
-              onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && create()} />
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button>
-              <Button onClick={create}>Create</Button>
-            </div>
-          </div>
-        </Modal>
-      )}
+      {creating && <CreateModal templates={templates} onClose={() => setCreating(false)}
+        onCreate={async (name, template) => {
+          try { const ws = await api.createWorkspace(name, template); navigate(`/builder?ws=${ws.id}`); }
+          catch (e) { toast(String(e), "error"); }
+        }} />}
     </div>
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone: "brand" | "ok" | "ink" }) {
-  const color = tone === "brand" ? "text-brand" : tone === "ok" ? "text-ok" : "text-ink";
+function CreateModal({ templates, onClose, onCreate }: {
+  templates: TemplateSummary[]; onClose: () => void;
+  onCreate: (name: string, template?: string) => void;
+}) {
+  const [name, setName] = useState("");
+  return (
+    <Modal title="New workflow" onClose={onClose}>
+      <div className="space-y-4">
+        <Input autoFocus placeholder="Name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
+        <div className="text-xs font-medium text-muted">Start from a template</div>
+        <div className="grid grid-cols-1 gap-2">
+          {templates.map((t) => (
+            <button key={t.id} onClick={() => onCreate(name || t.name, t.id)}
+              className="flex items-start gap-3 rounded-lg border border-border bg-canvas p-3 text-left transition hover:border-brand">
+              <FileStack className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+              <div>
+                <div className="text-sm font-medium text-ink">{t.name} <span className="text-xs text-muted">· {t.agents} agents · {t.tasks} tasks</span></div>
+                <div className="text-xs text-muted">{t.description}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+        <button onClick={() => onCreate(name || "Untitled Crew")}
+          className="w-full rounded-lg border border-dashed border-border p-3 text-sm text-muted transition hover:border-brand hover:text-ink">
+          Start blank
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function Stat({ label, value, tone }: { label: string; value: string; tone: "brand" | "ok" | "ink" | "muted" }) {
+  const color = tone === "brand" ? "text-brand" : tone === "ok" ? "text-ok" : tone === "muted" ? "text-muted" : "text-ink";
   return (
     <Card className="p-4">
       <div className="text-xs text-muted">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold ${color}`}>{value}</div>
+      <div className={`mt-1 truncate text-2xl font-semibold ${color}`}>{value}</div>
     </Card>
   );
 }
