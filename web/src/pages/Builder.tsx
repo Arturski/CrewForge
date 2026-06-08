@@ -166,7 +166,7 @@ export function Builder() {
                   <InlineToggle label="Reasoning" tip="Have the agent plan and reflect before acting. Higher quality, a bit slower."
                     checked={!!(agent as Record<string, unknown>).reasoning} onChange={(v) => mutate((w) => { (w.agents[sel!.idx] as Record<string, unknown>).reasoning = v; })} />
                 </div>
-                <LabeledField label="Skills" tip="Tools the agent can use (search, scrape, code…). Skills are transferable across agents. (Exported now; live execution lands with the Skills marketplace.)">
+                <LabeledField label="Skills" tip="Tools the agent can use (search, scrape, code…). Install more from the Skills marketplace; MCP skills run live, built-in tools are also exported. Transferable across agents.">
                   <SkillPicker all={tools} value={agent.tools ?? []} onChange={(v) => mutate((w) => { w.agents[sel!.idx].tools = v; })} />
                 </LabeledField>
 

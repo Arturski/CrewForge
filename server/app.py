@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import mcp, store
+from . import mcp, registry, store
 from .compiler.exporter import export_files, export_zip
 from .compiler.manifest import build_manifest
 from .compiler.tools import tool_catalog
@@ -45,6 +45,12 @@ def manifest() -> dict[str, Any]:
 @app.get("/api/tools")
 def tools() -> dict[str, Any]:
     return {"tools": tool_catalog() + mcp.mcp_tool_catalog()}
+
+
+# ---- Skill marketplace (official MCP registry) -----------------------------
+@app.get("/api/registry")
+def registry_search(q: str = "") -> dict[str, Any]:
+    return registry.search(q)
 
 
 # ---- MCP servers (external/local skills) -----------------------------------

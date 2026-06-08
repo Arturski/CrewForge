@@ -69,6 +69,16 @@ export interface McpInput {
   command?: string; args?: string[]; env?: Record<string, string>; url?: string;
 }
 
+export interface RegistryInstall {
+  transport: "stdio" | "sse" | "streamable-http";
+  command?: string; args?: string[]; url?: string;
+  env_required: string[]; source: string;
+}
+export interface RegistryServer {
+  name: string; title: string; description: string; version?: string;
+  status: string; risk: string; install: RegistryInstall;
+}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
   if (!r.ok) {
@@ -101,6 +111,7 @@ export const api = {
   testLlm: (cfg: Partial<{ model: string; base_url: string; api_key: string }>) =>
     req<{ ok: boolean; sample?: string; error?: string }>("/api/settings/llm/test", json("POST", cfg)),
 
+  registry: (q: string) => req<{ servers: RegistryServer[]; error?: string }>(`/api/registry?q=${encodeURIComponent(q)}`),
   mcpServers: () => req<{ servers: McpServer[] }>("/api/mcp"),
   addMcp: (cfg: McpInput) => req<McpServer>("/api/mcp", json("POST", cfg)),
   rescanMcp: (id: string) => req<McpServer>(`/api/mcp/${id}/rescan`, { method: "POST" }),
