@@ -1,5 +1,6 @@
 """Core unit tests — manifest introspection, adapter, exporter, store."""
 import yaml
+from crewai.llms.base_llm import BaseLLM
 
 from server import store
 from server.compiler.adapter import build_crew
@@ -59,3 +60,33 @@ def test_store_settings_roundtrip():
     store.init()
     store.set_setting("llm", {"model": "openai/gpt-4o-mini"})
     assert store.get_setting("llm")["model"] == "openai/gpt-4o-mini"
+
+
+class _StubLLM(BaseLLM):
+    def __init__(self):
+        super().__init__(model="stub")
+
+    def call(self, *a, **k):
+        return "ok"
+
+    def supports_function_calling(self):
+        return False
+
+
+def test_adapter_phase3_features():
+    spec = {
+        "agents": [{"id": "a1", "role": "Analyst", "goal": "g", "backstory": "b"}],
+        "tasks": [
+            {"agent": "a1", "name": "t1", "description": "d1", "expected_output": "o",
+             "async_execution": True},
+            {"agent": "a1", "name": "t2", "description": "d2", "expected_output": "o",
+             "output_schema": [{"name": "title", "type": "string"}, {"name": "score", "type": "integer"}]},
+        ],
+    }
+    per_agent = _StubLLM()
+    crew = build_crew(spec, llm=_StubLLM(), agent_llms={"a1": per_agent})
+    assert crew.agents[0].llm is per_agent          # per-agent override applied
+    assert crew.tasks[0].async_execution is True     # async honored
+    assert crew.tasks[1].output_pydantic is not None  # structured output (live path)
+    fields = crew.tasks[1].output_pydantic.model_fields
+    assert set(fields) == {"title", "score"}

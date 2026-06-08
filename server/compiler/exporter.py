@@ -26,6 +26,8 @@ def export_files(spec: dict[str, Any]) -> dict[str, str]:
     agents_yaml = {}
     for a in spec.get("agents", []):
         entry = {"role": a["role"], "goal": a["goal"], "backstory": a["backstory"]}
+        if a.get("llm_model"):
+            entry["llm"] = a["llm_model"]
         skills = list(dict.fromkeys(list(a.get("tools") or []) + workflow_skills))
         if skills:
             entry["tools"] = skills
@@ -38,6 +40,8 @@ def export_files(spec: dict[str, Any]) -> dict[str, str]:
             "expected_output": t["expected_output"],
             "agent": t["agent"],
         }
+        if t.get("async_execution"):
+            tasks_yaml[key]["async_execution"] = True
 
     process = "Process.hierarchical" if spec.get("process") == "hierarchical" else "Process.sequential"
 

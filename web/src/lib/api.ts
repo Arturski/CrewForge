@@ -37,6 +37,8 @@ export interface Workspace {
   skills?: string[]; // workflow-level skills, shared by all agents
   layout?: Record<string, { x: number; y: number }>; // canvas node positions
   inputs?: { name: string; description?: string; default?: string }[]; // run-time params
+  planning?: boolean; // crew plans before executing
+  memory?: boolean; // crew memory (live runs)
 }
 
 export interface RunEvent {

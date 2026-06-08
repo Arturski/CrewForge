@@ -9,6 +9,10 @@ from typing import Any
 
 from crewai import Agent, Crew, Process, Task
 from crewai.llms.base_llm import BaseLLM
+from pydantic import create_model
+
+# JSON-schema-ish field type -> python type for structured task outputs.
+_OUTPUT_TYPES = {"string": str, "number": float, "integer": int, "boolean": bool, "list": list}
 
 # Scalar Agent fields safe to pass straight through from the spec to the Agent
 # constructor (the curated UI + manifest "advanced" panel write these).
@@ -55,22 +59,39 @@ def _coerce(value: Any) -> Any:
     return value
 
 
+def _output_model(task_name: str, schema: list[dict[str, Any]]):
+    """Build a Pydantic model from a simple [{name, type}] schema for structured output."""
+    fields = {
+        f["name"]: (_OUTPUT_TYPES.get(f.get("type", "string"), str), ...)
+        for f in schema if f.get("name")
+    }
+    if not fields:
+        return None
+    safe = "".join(c for c in (task_name or "Output").title() if c.isalnum()) or "Output"
+    return create_model(f"{safe}Output", **fields)  # type: ignore[call-overload]
+
+
 def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None,
-               agent_tools: dict[str, list] | None = None) -> Crew:
+               agent_tools: dict[str, list] | None = None,
+               agent_llms: dict[str, Any] | None = None) -> Crew:
     """Build a CrewAI Crew from a CrewForge spec.
 
     - Curated + advanced scalar agent fields are passed through (AGENT_SCALAR_FIELDS).
-    - Per-task "rules" are compiled into the task description as hard constraints
-      (reliable, model-agnostic way to enforce strict reasoning/quality).
-    - HITL is a worker-owned guardrail gate (not crewai's native human_input).
-    - `planning` and hierarchical `process` are honored at the crew level.
+    - Per-agent LLM override via `agent_llms[agent_id]` (else the crew `llm`).
+    - Per-task "rules" compiled into the description as hard constraints.
+    - Structured output (task.output_schema) -> output_pydantic, live runs only.
+    - Crew `memory` enabled on live runs only (needs an embedder).
+    - HITL is a worker-owned guardrail gate; `planning`/hierarchical honored.
     """
     llm = llm or FakeLLM()
+    live = not isinstance(llm, FakeLLM)  # gates features that need a real model/embedder
+    agent_llms = agent_llms or {}
+
     agents: dict[str, Agent] = {}
     for a in spec.get("agents", []):
         kwargs: dict[str, Any] = {
             "role": a["role"], "goal": a["goal"], "backstory": a["backstory"],
-            "llm": llm, "verbose": False,
+            "llm": agent_llms.get(a["id"], llm), "verbose": False,
         }
         for f in AGENT_SCALAR_FIELDS:
             if f in a and _coerce(a[f]) is not None:
@@ -88,15 +109,20 @@ def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None,
                 f"{description}\n\nSTRICT RULES — you MUST follow every rule and "
                 f"reason step-by-step before answering:\n{rules}"
             )
-        guardrail = hitl_gate if (t.get("human_input") and hitl_gate) else None
-        tasks.append(
-            Task(
-                description=description,
-                expected_output=t["expected_output"],
-                agent=agents[t["agent"]],
-                guardrail=guardrail,
-            )
-        )
+        tkwargs: dict[str, Any] = {
+            "description": description,
+            "expected_output": t["expected_output"],
+            "agent": agents[t["agent"]],
+        }
+        if t.get("human_input") and hitl_gate:
+            tkwargs["guardrail"] = hitl_gate
+        if t.get("async_execution"):
+            tkwargs["async_execution"] = True
+        if live and t.get("output_schema"):
+            model = _output_model(t.get("name", ""), t["output_schema"])
+            if model is not None:
+                tkwargs["output_pydantic"] = model
+        tasks.append(Task(**tkwargs))
 
     process = (
         Process.hierarchical
@@ -110,6 +136,8 @@ def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None,
         "verbose": False,
         "planning": bool(spec.get("planning")),
     }
+    if live and spec.get("memory"):
+        crew_kwargs["memory"] = True
     if process == Process.hierarchical:
         crew_kwargs["manager_llm"] = llm
     return Crew(**crew_kwargs)

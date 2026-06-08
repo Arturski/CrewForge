@@ -167,6 +167,15 @@ export function Builder() {
             </div>
           </Card>
           <Card>
+            <CardHeader title="Workflow settings" />
+            <div className="space-y-3 p-4">
+              <InlineToggle label="Planning" tip="The crew plans the whole workflow before executing — improves multi-step quality."
+                checked={!!ws.planning} onChange={(v) => mutate((w) => { w.planning = v; })} />
+              <InlineToggle label="Memory" tip="Agents remember context across steps and past runs. Live runs only (needs a provider for embeddings)."
+                checked={!!ws.memory} onChange={(v) => mutate((w) => { w.memory = v; })} />
+            </div>
+          </Card>
+          <Card>
             <CardHeader title="Run inputs" sub="Variables you fill in at run time. Reference as {name} in tasks." />
             <div className="space-y-2 p-4">
               {(ws.inputs ?? []).map((inp, i) => (
@@ -230,6 +239,10 @@ export function Builder() {
                   <InlineToggle label="Reasoning" tip="Have the agent plan and reflect before acting. Higher quality, a bit slower."
                     checked={!!(agent as Record<string, unknown>).reasoning} onChange={(v) => mutate((w) => { (w.agents[sel!.idx] as Record<string, unknown>).reasoning = v; })} />
                 </div>
+                <LabeledField label="Model (optional)" tip="Override the workflow's default model for just this agent (uses your configured provider key). Blank = use the default.">
+                  <Input placeholder={`default: ${llm?.model || "dry-run"}`} value={(agent.llm_model as string) ?? ""}
+                    onChange={(e) => mutate((w) => { w.agents[sel!.idx].llm_model = e.target.value; })} />
+                </LabeledField>
                 <LabeledField label="Agent tools" tip="Tools only this agent can use, on top of any workflow-wide tools. Tools from integrations run live; built-in tools are also exported.">
                   <SkillPicker all={tools} value={agent.tools ?? []} onChange={(v) => mutate((w) => { w.agents[sel!.idx].tools = v; })} />
                 </LabeledField>
@@ -274,6 +287,28 @@ export function Builder() {
                 </LabeledField>
                 <InlineToggle label="Require human approval" tip="Pause for your review before the result passes to the next step."
                   checked={!!task.human_input} onChange={(v) => mutate((w) => { w.tasks[sel!.idx].human_input = v; })} />
+                <InlineToggle label="Run in parallel" tip="Run this task asynchronously alongside others (advanced)."
+                  checked={!!(task as Record<string, unknown>).async_execution}
+                  onChange={(v) => mutate((w) => { (w.tasks[sel!.idx] as Record<string, unknown>).async_execution = v; })} />
+                <div>
+                  <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
+                    Structured output<Tooltip text="Force the result into named JSON fields — great for piping into the next step or an app. Used on live runs." />
+                  </div>
+                  {(((task.output_schema as { name: string; type: string }[]) ?? [])).map((f, fi) => (
+                    <div key={fi} className="mb-2 flex items-center gap-2">
+                      <Input className="flex-1" placeholder="field name" value={f.name}
+                        onChange={(e) => mutate((w) => { (w.tasks[sel!.idx].output_schema as { name: string; type: string }[])[fi] = { ...f, name: e.target.value }; })} />
+                      <Select className="w-28" value={f.type}
+                        onChange={(e) => mutate((w) => { (w.tasks[sel!.idx].output_schema as { name: string; type: string }[])[fi] = { ...f, type: e.target.value }; })}>
+                        {["string", "integer", "number", "boolean", "list"].map((o) => <option key={o} value={o}>{o}</option>)}
+                      </Select>
+                      <button onClick={() => mutate((w) => { (w.tasks[sel!.idx].output_schema as unknown[]).splice(fi, 1); })}
+                        className="text-muted hover:text-danger" aria-label="Remove field"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                  ))}
+                  <button onClick={() => mutate((w) => { const t = w.tasks[sel!.idx] as Record<string, unknown>; t.output_schema = [...((t.output_schema as unknown[]) ?? []), { name: "", type: "string" }]; })}
+                    className="inline-flex items-center gap-1 text-sm text-brand hover:underline"><Plus className="h-3 w-3" /> Add field</button>
+                </div>
               </div>
             </>
           )}

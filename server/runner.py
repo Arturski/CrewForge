@@ -147,7 +147,26 @@ class RunManager:
                     except Exception as e:  # noqa: BLE001
                         emit("mcp.error", error=str(e)[:200])
 
-            crew = build_crew(spec, llm=llm, hitl_gate=hitl_gate, agent_tools=agent_tools)
+            # Per-agent model overrides (live runs reuse the configured key/base_url).
+            agent_llms: dict[str, Any] = {}
+            if not effective_dry:
+                cfg = store.get_setting("llm") or {}
+                for a in spec.get("agents", []):
+                    model = a.get("llm_model")
+                    if not model:
+                        continue
+                    kw: dict[str, Any] = {"model": model}
+                    if cfg.get("api_key"):
+                        kw["api_key"] = cfg["api_key"]
+                    if cfg.get("base_url"):
+                        kw["base_url"] = cfg["base_url"]
+                    try:
+                        agent_llms[a["id"]] = LLM(**kw)
+                    except Exception:  # noqa: BLE001
+                        pass
+
+            crew = build_crew(spec, llm=llm, hitl_gate=hitl_gate, agent_tools=agent_tools,
+                              agent_llms=agent_llms)
 
             tasks = spec.get("tasks", [])
             st = {"task_idx": -1, "starts": {}, "task_tokens": {}}
