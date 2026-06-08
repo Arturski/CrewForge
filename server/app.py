@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import store
+from . import mcp, store
 from .compiler.exporter import export_files, export_zip
 from .compiler.manifest import build_manifest
 from .compiler.tools import tool_catalog
@@ -44,7 +44,37 @@ def manifest() -> dict[str, Any]:
 
 @app.get("/api/tools")
 def tools() -> dict[str, Any]:
-    return {"tools": tool_catalog()}
+    return {"tools": tool_catalog() + mcp.mcp_tool_catalog()}
+
+
+# ---- MCP servers (external/local skills) -----------------------------------
+@app.get("/api/mcp")
+def list_mcp() -> dict[str, Any]:
+    return {"servers": mcp.list_servers()}
+
+
+@app.post("/api/mcp")
+async def add_mcp(req: Request) -> dict[str, Any]:
+    body = await req.json()
+    if body.get("transport", "stdio") == "stdio" and not body.get("command"):
+        raise HTTPException(400, "stdio servers need a command")
+    if body.get("transport") in ("sse", "streamable-http") and not body.get("url"):
+        raise HTTPException(400, "remote servers need a url")
+    return mcp.add_server(body)
+
+
+@app.post("/api/mcp/{server_id}/rescan")
+def rescan_mcp(server_id: str) -> dict[str, Any]:
+    s = mcp.rescan(server_id)
+    if not s:
+        raise HTTPException(404, "server not found")
+    return s
+
+
+@app.delete("/api/mcp/{server_id}")
+def delete_mcp(server_id: str) -> dict[str, Any]:
+    mcp.remove_server(server_id)
+    return {"ok": True}
 
 
 # ---- settings --------------------------------------------------------------
@@ -74,6 +104,28 @@ async def put_llm_settings(req: Request) -> dict[str, Any]:
         cfg.pop("api_key", None)
     store.set_setting("llm", cfg)
     return {"ok": True}
+
+
+@app.post("/api/settings/llm/test")
+async def test_llm(req: Request) -> dict[str, Any]:
+    body = await req.json() if await req.body() else {}
+    cfg = store.get_setting("llm") or {}
+    model = body.get("model") or cfg.get("model")
+    if not model:
+        raise HTTPException(400, "set a model first")
+    kwargs: dict[str, Any] = {"model": model}
+    api_key = body.get("api_key") or cfg.get("api_key")
+    base_url = body.get("base_url") or cfg.get("base_url")
+    if api_key:
+        kwargs["api_key"] = api_key
+    if base_url:
+        kwargs["base_url"] = base_url
+    try:
+        from crewai import LLM
+        out = LLM(**kwargs).call("Reply with exactly the word: ok")
+        return {"ok": True, "sample": str(out)[:120]}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
 
 
 # ---- workspaces (CRUD) -----------------------------------------------------

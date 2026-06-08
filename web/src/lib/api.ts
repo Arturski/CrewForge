@@ -53,7 +53,21 @@ export interface LlmSettings {
   temperature: number | null; api_key_set: boolean;
 }
 
-export interface ToolInfo { name: string; description: string }
+export interface ToolInfo {
+  name: string; description: string;
+  kind?: "builtin" | "mcp"; server?: string; server_id?: string; risk?: string;
+}
+
+export interface McpTool { name: string; description: string }
+export interface McpServer {
+  id: string; name: string; transport: "stdio" | "sse" | "streamable-http";
+  status: "connected" | "error"; risk: string; error?: string | null;
+  tools: McpTool[]; command?: string; url?: string;
+}
+export interface McpInput {
+  name: string; transport: "stdio" | "sse" | "streamable-http";
+  command?: string; args?: string[]; env?: Record<string, string>; url?: string;
+}
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
@@ -84,6 +98,13 @@ export const api = {
   getLlm: () => req<LlmSettings>("/api/settings/llm"),
   saveLlm: (cfg: Partial<{ model: string; base_url: string; temperature: number; api_key: string; clear_api_key: boolean }>) =>
     req<{ ok: boolean }>("/api/settings/llm", json("PUT", cfg)),
+  testLlm: (cfg: Partial<{ model: string; base_url: string; api_key: string }>) =>
+    req<{ ok: boolean; sample?: string; error?: string }>("/api/settings/llm/test", json("POST", cfg)),
+
+  mcpServers: () => req<{ servers: McpServer[] }>("/api/mcp"),
+  addMcp: (cfg: McpInput) => req<McpServer>("/api/mcp", json("POST", cfg)),
+  rescanMcp: (id: string) => req<McpServer>(`/api/mcp/${id}/rescan`, { method: "POST" }),
+  deleteMcp: (id: string) => req<{ ok: boolean }>(`/api/mcp/${id}`, { method: "DELETE" }),
 
   startRun: (workspace_id: string, dry_run = true) =>
     req<{ run_id: string }>("/api/runs", json("POST", { workspace_id, dry_run })),

@@ -23,7 +23,7 @@ from crewai.events.types.crew_events import (
 from crewai.events.types.llm_events import LLMCallCompletedEvent
 from crewai.events.types.task_events import TaskCompletedEvent, TaskStartedEvent
 
-from . import store
+from . import mcp, store
 from .compiler.adapter import FakeLLM, build_crew
 
 
@@ -116,10 +116,32 @@ class RunManager:
             emit("hitl.decision.received", decision="auto-approve (dry-run)")
             return (True, output)
 
+        adapters: list = []
         try:
             llm, effective_dry = self._build_llm(dry_run)
             rec["dry_run"] = effective_dry
-            crew = build_crew(spec, llm=llm, hitl_gate=hitl_gate)
+
+            # Live runs: connect MCP servers and attach their tools to agents.
+            agent_tools = None
+            if not effective_dry:
+                skill_names: set[str] = set()
+                for a in spec.get("agents", []):
+                    skill_names |= set(a.get("tools") or [])
+                if skill_names:
+                    try:
+                        tools, adapters = mcp.open_tools_for(skill_names)
+                        if tools:
+                            by_name = {t.name: t for t in tools}
+                            agent_tools = {}
+                            for a in spec.get("agents", []):
+                                ats = [by_name[n] for n in (a.get("tools") or []) if n in by_name]
+                                if ats:
+                                    agent_tools[a["id"]] = ats
+                            emit("mcp.tools.attached", count=len(tools))
+                    except Exception as e:  # noqa: BLE001
+                        emit("mcp.error", error=str(e)[:200])
+
+            crew = build_crew(spec, llm=llm, hitl_gate=hitl_gate, agent_tools=agent_tools)
             with crewai_event_bus.scoped_handlers():
                 for event_cls, kind, extract in EVENT_MAP:
                     def make(kind=kind, extract=extract):
@@ -147,6 +169,11 @@ class RunManager:
             rec["status"] = "failed"
             emit("run.failed", error=rec["error"][:300])
         finally:
+            for ad in adapters:
+                try:
+                    ad.stop()
+                except Exception:  # noqa: BLE001
+                    pass
             rec["finished_at"] = _now()
             store.update_run(self._public(rec))
 

@@ -55,7 +55,8 @@ def _coerce(value: Any) -> Any:
     return value
 
 
-def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None) -> Crew:
+def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None,
+               agent_tools: dict[str, list] | None = None) -> Crew:
     """Build a CrewAI Crew from a CrewForge spec.
 
     - Curated + advanced scalar agent fields are passed through (AGENT_SCALAR_FIELDS).
@@ -74,6 +75,8 @@ def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None)
         for f in AGENT_SCALAR_FIELDS:
             if f in a and _coerce(a[f]) is not None:
                 kwargs[f] = a[f]
+        if agent_tools and agent_tools.get(a["id"]):
+            kwargs["tools"] = agent_tools[a["id"]]
         agents[a["id"]] = Agent(**kwargs)
 
     tasks: list[Task] = []

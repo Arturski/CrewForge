@@ -24,6 +24,6 @@ def tool_catalog() -> list[dict[str, Any]]:
         if not isinstance(obj, type):
             continue
         doc = (obj.__doc__ or "").strip().split("\n")[0][:160]
-        out.append({"name": name, "description": doc or "CrewAI tool"})
+        out.append({"name": name, "description": doc or "CrewAI tool", "kind": "builtin"})
     out.sort(key=lambda t: t["name"])
     return out

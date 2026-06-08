@@ -45,13 +45,26 @@ export function DynamicForm({
   hideNames?: string[];
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [query, setQuery] = useState("");
   const usable = fields.filter((f) => !hideNames.includes(f.name));
   const common = usable.filter((f) => ["text", "textarea", "toggle", "number", "select"].includes(f.ui.control));
   const advanced = usable.filter((f) => !common.includes(f));
-  const visible = showAdvanced ? usable : common;
+
+  const q = query.trim().toLowerCase();
+  const matches = q
+    ? usable.filter((f) => f.name.toLowerCase().includes(q) || (f.description ?? "").toLowerCase().includes(q))
+    : null;
+  const visible = matches ?? (showAdvanced ? usable : common);
 
   return (
     <div>
+      <input
+        className="mb-4 w-full rounded-lg border border-border bg-canvas px-3 py-1.5 text-sm text-ink outline-none focus:border-brand placeholder:text-muted"
+        placeholder={`Search ${usable.length} settings…`}
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      {matches && <div className="mb-3 text-xs text-muted">{matches.length} match{matches.length === 1 ? "" : "es"}</div>}
       <div className="grid grid-cols-1 gap-x-6 gap-y-3 md:grid-cols-2">
         {visible.map((f) => (
           <div key={f.name} className={["textarea", "json", "keyvalue", "nested"].includes(f.ui.control) ? "md:col-span-2" : ""}>
@@ -64,7 +77,7 @@ export function DynamicForm({
           </div>
         ))}
       </div>
-      {advanced.length > 0 && (
+      {!matches && advanced.length > 0 && (
         <button onClick={() => setShowAdvanced((s) => !s)} className="mt-4 text-sm text-brand hover:underline">
           {showAdvanced ? "Hide advanced fields" : `Show all ${usable.length} manifest fields (+${advanced.length} advanced)`}
         </button>
