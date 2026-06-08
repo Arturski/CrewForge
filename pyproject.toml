@@ -1,11 +1,35 @@
 [project]
-name = "crewforge-spikes"
-version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.12"
+name = "crewforge"
+version = "0.2.0"
+description = "A no-code studio for CrewAI — design, run, and observe agentic workflows, then export a portable CrewAI project."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10,<3.14"
 dependencies = [
     "crewai>=1.14.6",
     "crewai-tools>=1.14.6",
     "fastapi>=0.136.3",
     "uvicorn[standard]>=0.49.0",
 ]
+
+[project.scripts]
+crewforge = "server.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server"]
+artifacts = ["web/dist/**"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I"]
+ignore = ["E501"]
