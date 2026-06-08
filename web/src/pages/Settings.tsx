@@ -136,7 +136,7 @@ export function Settings() {
           )}
 
           {provider.needsKey && (
-            <LabeledField label="API key" tip={`Stored locally in your CrewForge database. ${provider.keyHelp}`}>
+            <LabeledField label="API key" tip={`Encrypted at rest in your local CrewForge store. ${provider.keyHelp}`}>
               <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
                 placeholder={cfg?.api_key_set ? "•••••• (set — leave blank to keep)" : "paste your key"} />
             </LabeledField>

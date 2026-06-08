@@ -30,6 +30,7 @@ from crewai.events.types.tool_usage_events import (
 )
 
 from . import mcp, store
+from . import secrets as secrets_mod
 from .compiler.adapter import FakeLLM, build_crew
 
 
@@ -70,7 +71,7 @@ class RunManager:
             return FakeLLM(), True  # no provider configured -> safe dry-run fallback
         kwargs: dict[str, Any] = {"model": cfg["model"]}
         if cfg.get("api_key"):
-            kwargs["api_key"] = cfg["api_key"]
+            kwargs["api_key"] = secrets_mod.dec(cfg["api_key"])
         if cfg.get("base_url"):
             kwargs["base_url"] = cfg["base_url"]
         if cfg.get("temperature") is not None:
@@ -157,7 +158,7 @@ class RunManager:
                         continue
                     kw: dict[str, Any] = {"model": model}
                     if cfg.get("api_key"):
-                        kw["api_key"] = cfg["api_key"]
+                        kw["api_key"] = secrets_mod.dec(cfg["api_key"])
                     if cfg.get("base_url"):
                         kw["base_url"] = cfg["base_url"]
                     try:

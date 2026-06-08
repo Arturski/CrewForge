@@ -14,9 +14,11 @@ carry real risks. Please read this before running untrusted workflows or skills.
   pinned content hash. Default policy is **warn-but-allow**: risky skills are
   flagged with an explicit confirmation, never silently installed. Minimize the
   number of installed skills and re-scan after changes.
-- **Provider API keys** are stored locally in the SQLite database in plaintext
-  (single-user assumption). Do not commit `crewforge.db`. Encrypted-at-rest
-  secrets are planned for the multi-tenant phase.
+- **Provider API keys are encrypted at rest** (Fernet). The symmetric key lives
+  in a `0600` file next to the database (`secret.key`, gitignored) or via
+  `CREWFORGE_SECRET_KEY`. Keys are decrypted only in-process at run time and are
+  never returned to the client (the settings API reports only `api_key_set`).
+  Keep `secret.key` and `crewforge.db` out of version control.
 - **Runs are in-process today.** Containerized per-run isolation is on the
   roadmap; until then, treat a workflow run as running with your local trust.
 - **Dry-run mode** uses a built-in mock LLM and makes no network calls — safe for

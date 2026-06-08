@@ -21,6 +21,9 @@ web/dist/
 .env
 .env.*
 !.env.example
+secret.key
+*.key
+crewforge.db*
 
 # Spike artifacts
 spikes/**/manifest.json

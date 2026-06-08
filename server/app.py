@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import mcp, registry, store
 from . import personas as personas_mod
+from . import secrets as secrets_mod
 from . import templates as templates_mod
 from .compiler.exporter import export_files, export_zip
 from .compiler.manifest import build_manifest
@@ -122,7 +123,7 @@ async def put_llm_settings(req: Request) -> dict[str, Any]:
             cfg[k] = body[k]
     # only overwrite the key when a non-empty value is sent (keeps existing key on edits)
     if body.get("api_key"):
-        cfg["api_key"] = body["api_key"]
+        cfg["api_key"] = secrets_mod.enc(body["api_key"])  # encrypted at rest
     if body.get("clear_api_key"):
         cfg.pop("api_key", None)
     store.set_setting("llm", cfg)
@@ -137,7 +138,7 @@ async def test_llm(req: Request) -> dict[str, Any]:
     if not model:
         raise HTTPException(400, "set a model first")
     kwargs: dict[str, Any] = {"model": model}
-    api_key = body.get("api_key") or cfg.get("api_key")
+    api_key = body.get("api_key") or secrets_mod.dec(cfg.get("api_key"))
     base_url = body.get("base_url") or cfg.get("base_url")
     if api_key:
         kwargs["api_key"] = api_key
