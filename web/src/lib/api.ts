@@ -17,15 +17,20 @@ export interface Manifest {
 }
 
 export interface WorkspaceSummary {
-  id: string;
-  name: string;
-  description: string;
-  agents: number;
-  tasks: number;
+  id: string; name: string; description: string; agents: number; tasks: number;
 }
 
-export interface AgentSpec { id: string; role: string; goal: string; backstory: string }
-export interface TaskSpec { agent: string; description: string; expected_output: string; human_input?: boolean }
+export interface AgentSpec {
+  id: string; role: string; goal: string; backstory: string;
+  tools?: string[]; allow_delegation?: boolean;
+  // agents may carry any additional crewai field set via the advanced panel
+  [key: string]: unknown;
+}
+export interface TaskSpec {
+  agent: string; description: string; expected_output: string;
+  human_input?: boolean; name?: string; rules?: string;
+  [key: string]: unknown;
+}
 export interface Workspace {
   id: string; name: string; description: string; process: string;
   agents: AgentSpec[]; tasks: TaskSpec[];
@@ -33,36 +38,55 @@ export interface Workspace {
 
 export interface RunEvent {
   seq: number; ts: string; kind: string;
-  agent?: string; crew?: string; decision?: string; status?: string; error?: string; chars?: number;
+  agent?: string; crew?: string; decision?: string; status?: string;
+  error?: string; chars?: number; mode?: string; tokens?: number;
 }
 
 export interface RunRecord {
   id: string; status: "running" | "succeeded" | "failed";
   dry_run: boolean; spec_name: string; started_at: string; finished_at: string | null;
-  result: string | null; error: string | null; event_count: number;
+  result: string | null; error: string | null; event_count: number; tokens?: number;
 }
 
-async function get<T>(url: string): Promise<T> {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-  return r.json();
+export interface LlmSettings {
+  configured: boolean; model: string; base_url: string;
+  temperature: number | null; api_key_set: boolean;
 }
-async function post<T>(url: string, body: unknown): Promise<T> {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-  return r.json();
+
+export interface ToolInfo { name: string; description: string }
+
+async function req<T>(url: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(url, init);
+  if (!r.ok) {
+    let detail = `${r.status} ${r.statusText}`;
+    try { detail = (await r.json()).detail ?? detail; } catch { /* noop */ }
+    throw new Error(detail);
+  }
+  return r.status === 204 ? (undefined as T) : r.json();
 }
+const json = (method: string, body: unknown) => ({
+  method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+});
 
 export const api = {
-  health: () => get<{ status: string; crewai_version: string; version: string }>("/api/health"),
-  manifest: () => get<Manifest>("/api/manifest"),
-  workspaces: () => get<{ workspaces: WorkspaceSummary[] }>("/api/workspaces"),
-  workspace: (id: string) => get<Workspace>(`/api/workspaces/${id}`),
-  startRun: (workspace_id: string) => post<{ run_id: string }>("/api/runs", { workspace_id }),
-  runs: () => get<{ runs: RunRecord[] }>("/api/runs"),
-  run: (id: string) => get<RunRecord>(`/api/runs/${id}`),
+  health: () => req<{ status: string; crewai_version: string; version: string }>("/api/health"),
+  manifest: () => req<Manifest>("/api/manifest"),
+  tools: () => req<{ tools: ToolInfo[] }>("/api/tools"),
+
+  workspaces: () => req<{ workspaces: WorkspaceSummary[] }>("/api/workspaces"),
+  workspace: (id: string) => req<Workspace>(`/api/workspaces/${id}`),
+  createWorkspace: (name: string) => req<Workspace>("/api/workspaces", json("POST", { name })),
+  saveWorkspace: (ws: Workspace) => req<Workspace>(`/api/workspaces/${ws.id}`, json("PUT", ws)),
+  deleteWorkspace: (id: string) => req<{ ok: boolean }>(`/api/workspaces/${id}`, { method: "DELETE" }),
+  code: (id: string) => req<{ files: Record<string, string> }>(`/api/workspaces/${id}/code`),
+  exportUrl: (id: string) => `/api/workspaces/${id}/export`,
+
+  getLlm: () => req<LlmSettings>("/api/settings/llm"),
+  saveLlm: (cfg: Partial<{ model: string; base_url: string; temperature: number; api_key: string; clear_api_key: boolean }>) =>
+    req<{ ok: boolean }>("/api/settings/llm", json("PUT", cfg)),
+
+  startRun: (workspace_id: string, dry_run = true) =>
+    req<{ run_id: string }>("/api/runs", json("POST", { workspace_id, dry_run })),
+  runs: () => req<{ runs: RunRecord[] }>("/api/runs"),
+  run: (id: string) => req<RunRecord>(`/api/runs/${id}`),
 };

@@ -1,5 +1,69 @@
 import type { ReactNode } from "react";
 
+const INPUT = "w-full rounded-lg border border-border bg-canvas px-3 py-1.5 text-sm text-ink outline-none focus:border-brand placeholder:text-muted";
+
+export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={`${INPUT} ${props.className ?? ""}`} />;
+}
+export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea {...props} className={`${INPUT} min-h-[72px] resize-y ${props.className ?? ""}`} />;
+}
+export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-xs text-muted">{hint}</span>}
+    </label>
+  );
+}
+export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button onClick={() => onChange(!checked)} type="button"
+      className={`relative h-6 w-11 rounded-full transition ${checked ? "bg-brand" : "bg-border-strong"}`}>
+      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${checked ? "left-[22px]" : "left-0.5"}`} />
+    </button>
+  );
+}
+export function Tooltip({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <span className="grid h-4 w-4 cursor-help place-items-center rounded-full border border-border text-[10px] text-muted" aria-label={text} tabIndex={0}>?</span>
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1.5 w-56 -translate-x-1/2 rounded-lg border border-border bg-elevated2 px-3 py-2 text-xs leading-snug text-ink opacity-0 shadow-xl transition group-hover:opacity-100 group-focus-within:opacity-100">
+        {text}
+      </span>
+    </span>
+  );
+}
+
+export function LabeledField({ label, tip, children }: { label: string; tip?: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
+        {label}{tip && <Tooltip text={tip} />}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+export function Select({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select {...props} className={`${INPUT} ${props.className ?? ""}`}>{children}</select>
+  );
+}
+
+export function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl border border-border bg-elevated shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b border-border px-4 py-3 font-semibold text-ink">{title}</div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <div className={`rounded-xl border border-border bg-elevated ${className}`}>{children}</div>

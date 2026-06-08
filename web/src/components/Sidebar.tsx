@@ -1,8 +1,10 @@
 import { NavLink } from "react-router-dom";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: "◆", end: true },
+  { to: "/", label: "Workflows", icon: "◆", end: true },
   { to: "/builder", label: "Builder", icon: "⚙" },
+  { to: "/tools", label: "Skills", icon: "🧩" },
+  { to: "/models", label: "Models", icon: "✦" },
   { to: "/runs", label: "Runs", icon: "▶" },
 ];
 

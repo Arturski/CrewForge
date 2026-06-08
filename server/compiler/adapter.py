@@ -1,4 +1,4 @@
-"""Adapter — declarative spec -> live CrewAI objects (promoted from spike B).
+"""Adapter — declarative spec -> live CrewAI objects.
 
 Also provides FakeLLM: a zero-cost, no-network mock model used for CrewForge's
 "dry-run" mode, so the product is fully try-able with no API key.
@@ -9,6 +9,15 @@ from typing import Any
 
 from crewai import Agent, Crew, Process, Task
 from crewai.llms.base_llm import BaseLLM
+
+# Scalar Agent fields safe to pass straight through from the spec to the Agent
+# constructor (the curated UI + manifest "advanced" panel write these).
+AGENT_SCALAR_FIELDS = {
+    "verbose", "max_iter", "max_rpm", "max_retry_limit", "allow_delegation",
+    "cache", "reasoning", "multimodal", "respect_context_window",
+    "max_execution_time", "inject_date", "date_format", "use_system_prompt",
+    "max_reasoning_attempts",
+}
 
 
 class FakeLLM(BaseLLM):
@@ -27,7 +36,7 @@ class FakeLLM(BaseLLM):
         return (
             "Thought: I now can give a great answer\n"
             f"Final Answer: [{role}] dry-run output #{self._n} — "
-            "(CrewForge mock LLM; set a real provider to run live)."
+            "(CrewForge mock LLM; configure a provider in Models to run live)."
         )
 
     def supports_function_calling(self) -> bool:
@@ -40,30 +49,46 @@ class FakeLLM(BaseLLM):
         return 8192
 
 
+def _coerce(value: Any) -> Any:
+    if value in ("", None):
+        return None
+    return value
+
+
 def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None) -> Crew:
     """Build a CrewAI Crew from a CrewForge spec.
 
-    HITL is modeled as a task `guardrail` (the worker-owned gate), NOT crewai's
-    native human_input (broken in 1.14.6). `hitl_gate(output) -> (approved, value)`.
+    - Curated + advanced scalar agent fields are passed through (AGENT_SCALAR_FIELDS).
+    - Per-task "rules" are compiled into the task description as hard constraints
+      (reliable, model-agnostic way to enforce strict reasoning/quality).
+    - HITL is a worker-owned guardrail gate (not crewai's native human_input).
+    - `planning` and hierarchical `process` are honored at the crew level.
     """
     llm = llm or FakeLLM()
     agents: dict[str, Agent] = {}
-    for a in spec["agents"]:
-        agents[a["id"]] = Agent(
-            role=a["role"],
-            goal=a["goal"],
-            backstory=a["backstory"],
-            llm=llm,
-            verbose=False,
-            allow_delegation=a.get("allow_delegation", False),
-        )
+    for a in spec.get("agents", []):
+        kwargs: dict[str, Any] = {
+            "role": a["role"], "goal": a["goal"], "backstory": a["backstory"],
+            "llm": llm, "verbose": False,
+        }
+        for f in AGENT_SCALAR_FIELDS:
+            if f in a and _coerce(a[f]) is not None:
+                kwargs[f] = a[f]
+        agents[a["id"]] = Agent(**kwargs)
 
     tasks: list[Task] = []
-    for t in spec["tasks"]:
+    for t in spec.get("tasks", []):
+        description = t["description"]
+        rules = (t.get("rules") or "").strip()
+        if rules:
+            description = (
+                f"{description}\n\nSTRICT RULES — you MUST follow every rule and "
+                f"reason step-by-step before answering:\n{rules}"
+            )
         guardrail = hitl_gate if (t.get("human_input") and hitl_gate) else None
         tasks.append(
             Task(
-                description=t["description"],
+                description=description,
                 expected_output=t["expected_output"],
                 agent=agents[t["agent"]],
                 guardrail=guardrail,
@@ -75,4 +100,13 @@ def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None)
         if spec.get("process") == "hierarchical"
         else Process.sequential
     )
-    return Crew(agents=list(agents.values()), tasks=tasks, process=process, verbose=False)
+    crew_kwargs: dict[str, Any] = {
+        "agents": list(agents.values()),
+        "tasks": tasks,
+        "process": process,
+        "verbose": False,
+        "planning": bool(spec.get("planning")),
+    }
+    if process == Process.hierarchical:
+        crew_kwargs["manager_llm"] = llm
+    return Crew(**crew_kwargs)
