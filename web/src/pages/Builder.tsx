@@ -160,10 +160,10 @@ export function Builder() {
         {/* lists */}
         <div className="space-y-4">
           <Card>
-            <CardHeader title="Workflow skills" sub="Shared by every agent in this crew." />
+            <CardHeader title="Workflow tools" sub="Tools shared by every agent in this crew." />
             <div className="p-4">
               <SkillPicker all={tools} value={ws.skills ?? []} onChange={(v) => mutate((w) => { w.skills = v; })} />
-              <p className="mt-2 text-xs text-muted">Add more under <Link to="/mcp" className="text-brand hover:underline">MCP</Link>.</p>
+              <p className="mt-2 text-xs text-muted">Get more in <Link to="/tools?tab=integrations" className="text-brand hover:underline">Tools → Integrations</Link>.</p>
             </div>
           </Card>
           <Card>
@@ -230,7 +230,7 @@ export function Builder() {
                   <InlineToggle label="Reasoning" tip="Have the agent plan and reflect before acting. Higher quality, a bit slower."
                     checked={!!(agent as Record<string, unknown>).reasoning} onChange={(v) => mutate((w) => { (w.agents[sel!.idx] as Record<string, unknown>).reasoning = v; })} />
                 </div>
-                <LabeledField label="Skills (this agent)" tip="Capabilities only this agent can use, on top of any workflow-wide skills. Add more under MCP. MCP skills run live; built-in tools are also exported.">
+                <LabeledField label="Agent tools" tip="Tools only this agent can use, on top of any workflow-wide tools. Tools from integrations run live; built-in tools are also exported.">
                   <SkillPicker all={tools} value={agent.tools ?? []} onChange={(v) => mutate((w) => { w.agents[sel!.idx].tools = v; })} />
                 </LabeledField>
 
@@ -376,9 +376,9 @@ function SkillPicker({ all, value, onChange }: { all: ToolInfo[]; value: string[
             {s}<button onClick={() => onChange(value.filter((x) => x !== s))} className="text-muted hover:text-danger">✕</button>
           </span>
         ))}
-        {!value.length && <span className="text-xs text-muted">No skills attached.</span>}
+        {!value.length && <span className="text-xs text-muted">No tools attached.</span>}
       </div>
-      <Input placeholder={all.length ? "Search skills to add…" : "No skill catalog available"} value={q}
+      <Input placeholder={all.length ? "Search tools to add…" : "No tools available"} value={q}
         onFocus={() => setOpen(true)} onChange={(e) => { setQ(e.target.value); setOpen(true); }} />
       {open && matches.length > 0 && (
         <div className="mt-1 rounded-lg border border-border bg-elevated2">

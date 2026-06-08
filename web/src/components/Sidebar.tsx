@@ -1,12 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { LayoutGrid, Workflow, Play, Puzzle, Plug, Sparkles, type LucideIcon } from "lucide-react";
+import { LayoutGrid, Workflow, Play, Puzzle, Sparkles, type LucideIcon } from "lucide-react";
 
 const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: "/", label: "Workflows", icon: LayoutGrid, end: true },
   { to: "/builder", label: "Builder", icon: Workflow },
   { to: "/runs", label: "Runs", icon: Play },
-  { to: "/skills", label: "Skills", icon: Puzzle },
-  { to: "/mcp", label: "MCP", icon: Plug },
+  { to: "/tools", label: "Tools", icon: Puzzle },
   { to: "/models", label: "Models", icon: Sparkles },
 ];
 

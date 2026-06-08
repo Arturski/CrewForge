@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./pages/Dashboard";
 import { Builder } from "./pages/Builder";
 import { Runs } from "./pages/Runs";
-import { Skills } from "./pages/Skills";
-import { Mcp } from "./pages/Mcp";
+import { Tools } from "./pages/Tools";
 import { Settings } from "./pages/Settings";
 import { Code } from "./pages/Code";
 import { ToastProvider } from "./lib/toast";
@@ -27,8 +26,9 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/builder" element={<Builder />} />
               <Route path="/runs" element={<Runs />} />
-              <Route path="/skills" element={<Skills />} />
-              <Route path="/mcp" element={<Mcp />} />
+              <Route path="/tools" element={<Tools />} />
+              <Route path="/skills" element={<Navigate to="/tools" replace />} />
+              <Route path="/mcp" element={<Navigate to="/tools?tab=integrations" replace />} />
               <Route path="/models" element={<Settings />} />
               <Route path="/code" element={<Code />} />
             </Routes>

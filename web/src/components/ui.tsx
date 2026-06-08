@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as SwitchPrimitive from "@radix-ui/react-switch";
+import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { cva, type VariantProps } from "class-variance-authority";
 import { HelpCircle, X } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -138,6 +139,27 @@ export function Tooltip({ text, children }: { text: string; children?: ReactNode
       </TooltipPrimitive.Root>
     </TooltipPrimitive.Provider>
   );
+}
+
+// -- Tabs (Radix) ------------------------------------------------------------
+export const Tabs = TabsPrimitive.Root;
+export function TabsList({ children }: { children: ReactNode }) {
+  return (
+    <TabsPrimitive.List className="inline-flex items-center gap-1 rounded-lg border border-border bg-elevated p-1">
+      {children}
+    </TabsPrimitive.List>
+  );
+}
+export function TabsTrigger({ value, children }: { value: string; children: ReactNode }) {
+  return (
+    <TabsPrimitive.Trigger value={value}
+      className="rounded-md px-3 py-1.5 text-sm text-muted outline-none transition hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/40 data-[state=active]:bg-brand-soft data-[state=active]:text-ink">
+      {children}
+    </TabsPrimitive.Trigger>
+  );
+}
+export function TabsContent({ value, children }: { value: string; children: ReactNode }) {
+  return <TabsPrimitive.Content value={value} className="mt-5 outline-none">{children}</TabsPrimitive.Content>;
 }
 
 // -- Toggle (Radix Switch) ---------------------------------------------------
