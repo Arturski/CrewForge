@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import uuid
 from pathlib import Path
@@ -12,9 +13,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-import copy
-
-from . import mcp, personas as personas_mod, registry, store, templates as templates_mod
+from . import mcp, registry, store
+from . import personas as personas_mod
+from . import templates as templates_mod
 from .compiler.exporter import export_files, export_zip
 from .compiler.manifest import build_manifest
 from .compiler.tools import tool_catalog
