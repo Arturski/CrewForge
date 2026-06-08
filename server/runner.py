@@ -7,13 +7,15 @@ from __future__ import annotations
 
 import datetime as dt
 import threading
+import time
 import uuid
-from typing import Any, Callable
+from typing import Any
 
 from crewai import LLM
 from crewai.events import crewai_event_bus
 from crewai.events.types.agent_events import (
     AgentExecutionCompletedEvent,
+    AgentExecutionErrorEvent,
     AgentExecutionStartedEvent,
 )
 from crewai.events.types.crew_events import (
@@ -22,6 +24,10 @@ from crewai.events.types.crew_events import (
 )
 from crewai.events.types.llm_events import LLMCallCompletedEvent
 from crewai.events.types.task_events import TaskCompletedEvent, TaskStartedEvent
+from crewai.events.types.tool_usage_events import (
+    ToolUsageFinishedEvent,
+    ToolUsageStartedEvent,
+)
 
 from . import mcp, store
 from .compiler.adapter import FakeLLM, build_crew
@@ -31,19 +37,12 @@ def _now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
-def _agent_role(ev: Any) -> dict[str, Any]:
-    return {"agent": getattr(getattr(ev, "agent", None), "role", None)}
+def _role(ev: Any) -> str | None:
+    return getattr(getattr(ev, "agent", None), "role", None)
 
 
-EVENT_MAP: list[tuple[type, str, Callable[[Any], dict[str, Any]]]] = [
-    (CrewKickoffStartedEvent, "crew.kickoff.started",
-     lambda ev: {"crew": getattr(ev, "crew_name", None)}),
-    (TaskStartedEvent, "task.started", lambda ev: {}),
-    (AgentExecutionStartedEvent, "agent.execution.started", _agent_role),
-    (AgentExecutionCompletedEvent, "agent.execution.completed", _agent_role),
-    (TaskCompletedEvent, "task.completed", lambda ev: {}),
-    (CrewKickoffCompletedEvent, "crew.kickoff.completed", lambda ev: {}),
-]
+def _ms(start: float | None) -> int | None:
+    return round((time.monotonic() - start) * 1000) if start else None
 
 
 def _extract_tokens(ev: Any) -> int:
@@ -149,21 +148,65 @@ class RunManager:
                         emit("mcp.error", error=str(e)[:200])
 
             crew = build_crew(spec, llm=llm, hitl_gate=hitl_gate, agent_tools=agent_tools)
-            with crewai_event_bus.scoped_handlers():
-                for event_cls, kind, extract in EVENT_MAP:
-                    def make(kind=kind, extract=extract):
-                        def handler(source, event):
-                            try:
-                                extra = extract(event)
-                            except Exception:  # noqa: BLE001
-                                extra = {}
-                            emit(kind, **extra)
-                        return handler
-                    crewai_event_bus.register_handler(event_cls, make())
 
-                def on_llm_done(source, event):
-                    rec["tokens"] += _extract_tokens(event)
-                crewai_event_bus.register_handler(LLMCallCompletedEvent, on_llm_done)
+            tasks = spec.get("tasks", [])
+            st = {"task_idx": -1, "starts": {}, "task_tokens": {}}
+
+            def reg(event_cls, fn):
+                crewai_event_bus.register_handler(event_cls, fn)
+
+            with crewai_event_bus.scoped_handlers():
+                reg(CrewKickoffStartedEvent,
+                    lambda s, e: emit("crew.kickoff.started", crew=getattr(e, "crew_name", None)))
+
+                def on_task_start(s, e):
+                    st["task_idx"] += 1
+                    i = st["task_idx"]
+                    st["starts"][f"task:{i}"] = time.monotonic()
+                    name = (tasks[i].get("name") if i < len(tasks) else None) or f"task {i + 1}"
+                    emit("task.started", task_index=i, task=name)
+                reg(TaskStartedEvent, on_task_start)
+
+                def on_agent_start(s, e):
+                    role = _role(e)
+                    if role:
+                        st["starts"][f"agent:{role}"] = time.monotonic()
+                    emit("agent.execution.started", agent=role)
+                reg(AgentExecutionStartedEvent, on_agent_start)
+
+                def on_agent_done(s, e):
+                    role = _role(e)
+                    ms = _ms(st["starts"].pop(f"agent:{role}", None))
+                    emit("agent.execution.completed", agent=role, ms=ms)
+                reg(AgentExecutionCompletedEvent, on_agent_done)
+
+                def on_llm_done(s, e):
+                    tk = _extract_tokens(e)
+                    rec["tokens"] += tk
+                    i = st["task_idx"]
+                    if i >= 0:
+                        st["task_tokens"][i] = st["task_tokens"].get(i, 0) + tk
+                reg(LLMCallCompletedEvent, on_llm_done)
+
+                def on_task_done(s, e):
+                    i = st["task_idx"]
+                    emit("task.completed", task_index=i, ms=_ms(st["starts"].pop(f"task:{i}", None)),
+                         tokens=st["task_tokens"].get(i) or None)
+                reg(TaskCompletedEvent, on_task_done)
+
+                def on_tool_start(s, e):
+                    emit("tool.started", tool=getattr(e, "tool_name", None))
+                reg(ToolUsageStartedEvent, on_tool_start)
+
+                def on_tool_done(s, e):
+                    emit("tool.finished", tool=getattr(e, "tool_name", None))
+                reg(ToolUsageFinishedEvent, on_tool_done)
+
+                def on_agent_error(s, e):
+                    emit("agent.error", agent=_role(e), error=str(getattr(e, "error", ""))[:300])
+                reg(AgentExecutionErrorEvent, on_agent_error)
+
+                reg(CrewKickoffCompletedEvent, lambda s, e: emit("crew.kickoff.completed"))
 
                 emit("run.started", crew=spec.get("name"),
                      mode="dry-run" if effective_dry else "live")

@@ -43,12 +43,14 @@ export interface RunEvent {
   seq: number; ts: string; kind: string;
   agent?: string; crew?: string; decision?: string; status?: string;
   error?: string; chars?: number; mode?: string; tokens?: number;
+  task?: string; task_index?: number; ms?: number; tool?: string; count?: number;
 }
 
 export interface RunRecord {
   id: string; status: "running" | "succeeded" | "failed";
   dry_run: boolean; spec_name: string; started_at: string; finished_at: string | null;
   result: string | null; error: string | null; event_count: number; tokens?: number;
+  workspace_id?: string;
 }
 
 export interface LlmSettings {
