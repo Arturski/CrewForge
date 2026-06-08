@@ -74,10 +74,13 @@ export interface ToolInfo {
 }
 
 export interface McpTool { name: string; description: string }
+export interface SecurityAssessment {
+  level: "low" | "medium" | "high"; label: string; factors: string[]; scanner: string;
+}
 export interface McpServer {
   id: string; name: string; transport: "stdio" | "sse" | "streamable-http";
   status: "connected" | "error"; risk: string; error?: string | null;
-  tools: McpTool[]; command?: string; url?: string;
+  tools: McpTool[]; command?: string; url?: string; security?: SecurityAssessment;
 }
 export interface McpInput {
   name: string; transport: "stdio" | "sse" | "streamable-http";
@@ -91,7 +94,7 @@ export interface RegistryInstall {
 }
 export interface RegistryServer {
   name: string; title: string; description: string; version?: string;
-  status: string; risk: string; install: RegistryInstall;
+  status: string; risk: string; install: RegistryInstall; security?: SecurityAssessment;
 }
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {

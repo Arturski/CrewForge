@@ -4,11 +4,27 @@ import {
   api, type McpInput, type McpServer, type RegistryServer, type ToolInfo,
 } from "../lib/api";
 import {
-  Badge, Button, Card, CardHeader, Input, LabeledField, Modal, Select,
+  Badge, Button, Card, CardHeader, Input, LabeledField, Modal, Select, Tooltip,
   Tabs, TabsList, TabsTrigger, TabsContent,
 } from "../components/ui";
+import type { SecurityAssessment } from "../lib/api";
 import { useToast } from "../lib/toast";
-import { Bot, Plug, Puzzle, ArrowRight } from "lucide-react";
+import { Bot, Plug, Puzzle, ArrowRight, ShieldAlert, ShieldCheck } from "lucide-react";
+
+const SEC_TONE = { high: "warn", medium: "muted", low: "ok" } as const;
+
+function SecurityBadge({ sec }: { sec?: SecurityAssessment }) {
+  if (!sec) return null;
+  const Icon = sec.level === "high" ? ShieldAlert : ShieldCheck;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Badge tone={SEC_TONE[sec.level]}>
+        <Icon className="mr-1 h-3 w-3" />{sec.label}
+      </Badge>
+      <Tooltip text={`Security: ${sec.factors.join(" · ")}`} />
+    </span>
+  );
+}
 
 // One hub for capabilities. Mental model, made explicit:
 //   Integrations (MCP)  →provide→  Tools  →attached to→  Agents
@@ -161,9 +177,8 @@ function Integrations() {
             <div key={s.id} className="px-4 py-3">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-ink">{s.name}</span>
-                <Badge tone="muted">{s.transport === "stdio" ? "local" : "remote"}</Badge>
                 <Badge tone={s.status === "connected" ? "ok" : "danger"}>{s.status}</Badge>
-                {s.risk === "high" && <Badge tone="warn">runs local code</Badge>}
+                <SecurityBadge sec={s.security} />
                 <span className="ml-auto flex gap-3 text-xs">
                   <button onClick={() => api.rescanMcp(s.id).then(load)} className="text-brand hover:underline">re-scan</button>
                   <button onClick={() => removeServer(s.id)} className="text-muted hover:text-danger">disconnect</button>
@@ -234,9 +249,7 @@ function Marketplace({ onInstalled }: { onInstalled: () => void }) {
             <div key={s.name} className="rounded-lg border border-border bg-canvas p-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="truncate font-medium text-ink">{s.title}</div>
-                <Badge tone={s.install.transport === "stdio" ? "warn" : "muted"}>
-                  {s.install.transport === "stdio" ? `local · ${s.install.source}` : "remote"}
-                </Badge>
+                <SecurityBadge sec={s.security} />
               </div>
               <p className="mt-1 line-clamp-2 text-xs text-muted">{s.description || s.name}</p>
               <div className="mt-2 flex items-center gap-2">

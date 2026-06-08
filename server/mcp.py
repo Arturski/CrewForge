@@ -23,7 +23,11 @@ _KEY = "mcp_servers"
 
 
 def list_servers() -> list[dict[str, Any]]:
-    return store.get_setting(_KEY, []) or []
+    from . import security
+    servers = store.get_setting(_KEY, []) or []
+    for s in servers:
+        s["security"] = security.assess(s)
+    return servers
 
 
 def _save(servers: list[dict[str, Any]]) -> None:

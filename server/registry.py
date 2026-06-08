@@ -68,6 +68,7 @@ def _card(item: dict[str, Any]) -> dict[str, Any] | None:
                 break
     if not install:
         return None
+    from . import security
     return {
         "name": s.get("name", ""),
         "title": s.get("title") or s.get("name", ""),
@@ -75,6 +76,7 @@ def _card(item: dict[str, Any]) -> dict[str, Any] | None:
         "version": s.get("version"),
         "status": meta.get("status", "active"),
         "risk": "high" if install["transport"] == "stdio" else "medium",
+        "security": security.assess({**install, "registry_listed": True}),
         "install": install,
     }
 
