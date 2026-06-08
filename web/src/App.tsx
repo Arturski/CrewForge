@@ -4,7 +4,8 @@ import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./pages/Dashboard";
 import { Builder } from "./pages/Builder";
 import { Runs } from "./pages/Runs";
-import { Tools } from "./pages/Tools";
+import { Skills } from "./pages/Skills";
+import { Mcp } from "./pages/Mcp";
 import { Settings } from "./pages/Settings";
 import { Code } from "./pages/Code";
 import { ToastProvider } from "./lib/toast";
@@ -25,10 +26,11 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/builder" element={<Builder />} />
-              <Route path="/tools" element={<Tools />} />
+              <Route path="/runs" element={<Runs />} />
+              <Route path="/skills" element={<Skills />} />
+              <Route path="/mcp" element={<Mcp />} />
               <Route path="/models" element={<Settings />} />
               <Route path="/code" element={<Code />} />
-              <Route path="/runs" element={<Runs />} />
             </Routes>
           </div>
         </main>

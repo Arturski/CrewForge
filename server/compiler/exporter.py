@@ -22,11 +22,14 @@ def export_files(spec: dict[str, Any]) -> dict[str, str]:
     name = spec.get("name", "Crew")
     slug = _slug(name)
 
-    agents_yaml = {
-        a["id"]: {"role": a["role"], "goal": a["goal"], "backstory": a["backstory"]}
-        | ({"tools": a["tools"]} if a.get("tools") else {})
-        for a in spec.get("agents", [])
-    }
+    workflow_skills = list(spec.get("skills") or [])
+    agents_yaml = {}
+    for a in spec.get("agents", []):
+        entry = {"role": a["role"], "goal": a["goal"], "backstory": a["backstory"]}
+        skills = list(dict.fromkeys(list(a.get("tools") or []) + workflow_skills))
+        if skills:
+            entry["tools"] = skills
+        agents_yaml[a["id"]] = entry
     tasks_yaml = {}
     for i, t in enumerate(spec.get("tasks", [])):
         key = t.get("name") or f"task_{i + 1}"

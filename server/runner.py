@@ -122,9 +122,12 @@ class RunManager:
             rec["dry_run"] = effective_dry
 
             # Live runs: connect MCP servers and attach their tools to agents.
+            # Skills attach at two scopes: per-agent (agent.tools) and
+            # workflow-wide (spec.skills, shared by every agent).
             agent_tools = None
             if not effective_dry:
-                skill_names: set[str] = set()
+                workflow_skills = list(spec.get("skills") or [])
+                skill_names: set[str] = set(workflow_skills)
                 for a in spec.get("agents", []):
                     skill_names |= set(a.get("tools") or [])
                 if skill_names:
@@ -134,7 +137,8 @@ class RunManager:
                             by_name = {t.name: t for t in tools}
                             agent_tools = {}
                             for a in spec.get("agents", []):
-                                ats = [by_name[n] for n in (a.get("tools") or []) if n in by_name]
+                                names = list(a.get("tools") or []) + workflow_skills
+                                ats = [by_name[n] for n in dict.fromkeys(names) if n in by_name]
                                 if ats:
                                     agent_tools[a["id"]] = ats
                             emit("mcp.tools.attached", count=len(tools))

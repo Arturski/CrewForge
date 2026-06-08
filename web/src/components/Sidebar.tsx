@@ -3,9 +3,10 @@ import { NavLink } from "react-router-dom";
 const NAV = [
   { to: "/", label: "Workflows", icon: "◆", end: true },
   { to: "/builder", label: "Builder", icon: "⚙" },
-  { to: "/tools", label: "Skills", icon: "🧩" },
-  { to: "/models", label: "Models", icon: "✦" },
   { to: "/runs", label: "Runs", icon: "▶" },
+  { to: "/skills", label: "Skills", icon: "🧩" },
+  { to: "/mcp", label: "MCP", icon: "🔌" },
+  { to: "/models", label: "Models", icon: "✦" },
 ];
 
 export function Sidebar({ crewaiVersion }: { crewaiVersion?: string }) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   api, type AgentSpec, type Manifest, type TaskSpec, type ToolInfo, type Workspace,
 } from "../lib/api";
@@ -31,11 +31,23 @@ export function Builder() {
     api.manifest().then(setManifest).catch(() => {});
     api.tools().then((d) => setTools(d.tools)).catch(() => {});
   }, []);
+  // No dead-end: if no workspace in the URL, open the last-used (or first) one.
+  useEffect(() => {
+    if (wsId) return;
+    const go = (id: string) => navigate(`/builder?ws=${id}`, { replace: true });
+    (async () => {
+      const last = localStorage.getItem("cf:lastWs");
+      if (last) { try { await api.workspace(last); return go(last); } catch { /* stale */ } }
+      try { const { workspaces } = await api.workspaces(); if (workspaces[0]) go(workspaces[0].id); } catch { /* none */ }
+    })();
+  }, [wsId, navigate]);
+
   useEffect(() => {
     if (!wsId) return;
     api.workspace(wsId).then((w) => {
       setWs(w);
       setSel(w.agents.length ? { kind: "agent", idx: 0 } : null);
+      localStorage.setItem("cf:lastWs", w.id);
     }).catch(() => toast("Workspace not found", "error"));
   }, [wsId]);
 
@@ -118,6 +130,13 @@ export function Builder() {
         {/* lists */}
         <div className="space-y-4">
           <Card>
+            <CardHeader title="Workflow skills" sub="Shared by every agent in this crew." />
+            <div className="p-4">
+              <SkillPicker all={tools} value={ws.skills ?? []} onChange={(v) => mutate((w) => { w.skills = v; })} />
+              <p className="mt-2 text-xs text-muted">Add more under <Link to="/mcp" className="text-brand hover:underline">MCP</Link>.</p>
+            </div>
+          </Card>
+          <Card>
             <CardHeader title="Agents" right={<button onClick={addAgent} className="text-sm text-brand hover:underline">+ Add</button>} />
             <div className="divide-y divide-border">
               {ws.agents.map((a, i) => (
@@ -166,7 +185,7 @@ export function Builder() {
                   <InlineToggle label="Reasoning" tip="Have the agent plan and reflect before acting. Higher quality, a bit slower."
                     checked={!!(agent as Record<string, unknown>).reasoning} onChange={(v) => mutate((w) => { (w.agents[sel!.idx] as Record<string, unknown>).reasoning = v; })} />
                 </div>
-                <LabeledField label="Skills" tip="Tools the agent can use (search, scrape, code…). Install more from the Skills marketplace; MCP skills run live, built-in tools are also exported. Transferable across agents.">
+                <LabeledField label="Skills (this agent)" tip="Capabilities only this agent can use, on top of any workflow-wide skills. Add more under MCP. MCP skills run live; built-in tools are also exported.">
                   <SkillPicker all={tools} value={agent.tools ?? []} onChange={(v) => mutate((w) => { w.agents[sel!.idx].tools = v; })} />
                 </LabeledField>
 
@@ -226,11 +245,18 @@ export function Builder() {
 }
 
 function Empty() {
+  const navigate = useNavigate();
+  const toast = useToast();
+  async function create() {
+    try { const ws = await api.createWorkspace("Untitled Crew"); navigate(`/builder?ws=${ws.id}`); }
+    catch (e) { toast(String(e), "error"); }
+  }
   return (
     <div className="grid h-[60vh] place-items-center text-center">
       <div>
-        <div className="text-lg font-semibold text-ink">No workflow selected</div>
-        <p className="mt-1 text-sm text-muted">Open or create a workflow from the Dashboard.</p>
+        <div className="text-lg font-semibold text-ink">No workflows yet</div>
+        <p className="mt-1 text-sm text-muted">Create your first workflow to start building.</p>
+        <div className="mt-4"><Button onClick={create}>+ New workflow</Button></div>
       </div>
     </div>
   );
@@ -284,9 +310,11 @@ function SkillPicker({ all, value, onChange }: { all: ToolInfo[]; value: string[
       {open && matches.length > 0 && (
         <div className="mt-1 rounded-lg border border-border bg-elevated2">
           {matches.map((t) => (
-            <button key={t.name} onClick={() => { if (!value.includes(t.name)) onChange([...value, t.name]); setQ(""); }}
-              className="block w-full px-3 py-1.5 text-left text-xs hover:bg-canvas">
-              <span className="text-ink">{t.name}</span> <span className="text-muted">{t.description.slice(0, 50)}</span>
+            <button key={`${t.kind}:${t.server ?? ""}:${t.name}`} onClick={() => { if (!value.includes(t.name)) onChange([...value, t.name]); setQ(""); }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-canvas">
+              <span className={`shrink-0 rounded px-1 py-0.5 text-[9px] ${t.kind === "mcp" ? "bg-brand/15 text-brand" : "bg-ok/15 text-ok"}`}>{t.kind === "mcp" ? "MCP" : "built-in"}</span>
+              <span className="truncate text-ink">{t.name}</span>
+              <span className="truncate text-muted">{t.description.slice(0, 40)}</span>
             </button>
           ))}
         </div>

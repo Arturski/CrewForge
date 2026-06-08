@@ -34,6 +34,7 @@ export interface TaskSpec {
 export interface Workspace {
   id: string; name: string; description: string; process: string;
   agents: AgentSpec[]; tasks: TaskSpec[];
+  skills?: string[]; // workflow-level skills, shared by all agents
 }
 
 export interface RunEvent {
