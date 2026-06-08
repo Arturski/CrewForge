@@ -25,7 +25,7 @@ export function Builder() {
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [sel, setSel] = useState<Sel>(null);
   const [dirty, setDirty] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [llm, setLlm] = useState<LlmSettings | null>(null);
   const [dryRun, setDryRun] = useState(true);
@@ -81,16 +81,24 @@ export function Builder() {
     setWs((w) => { if (w) setSel({ kind: "task", idx: w.tasks.length - 1 }); return w; });
   }
 
-  async function save() {
+  async function persist() {
     if (!ws) return;
-    setBusy(true);
-    try { await api.saveWorkspace(ws); setDirty(false); toast("Saved", "ok"); }
+    setSaving(true);
+    try { await api.saveWorkspace(ws); setDirty(false); }
     catch (e) { toast(String(e), "error"); }
-    finally { setBusy(false); }
+    finally { setSaving(false); }
   }
+
+  // Autosave: persist ~900ms after the last edit (no manual Save needed).
+  useEffect(() => {
+    if (!ws || !dirty) return;
+    const id = window.setTimeout(() => { persist(); }, 900);
+    return () => window.clearTimeout(id);
+  }, [ws, dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function doRun(inputs: Record<string, string>) {
     if (!ws) return;
-    if (dirty) await save();
+    if (dirty) await persist();
     try {
       const { run_id } = await api.startRun(ws.id, dryRun, inputs);
       navigate(`/runs?run=${run_id}`);
@@ -124,7 +132,7 @@ export function Builder() {
               <option value="sequential">sequential</option>
               <option value="hierarchical">hierarchical</option>
             </Select>
-            {dirty && <Badge tone="warn">unsaved</Badge>}
+            <span className="text-muted">{saving ? "saving…" : dirty ? "editing…" : "✓ saved"}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -137,7 +145,6 @@ export function Builder() {
           </div>
           <Button variant="ghost" size="icon" onClick={() => window.open(api.exportUrl(ws.id), "_blank")} title="Export project"><Download className="h-4 w-4" /></Button>
           <Button variant="ghost" size="icon" onClick={() => navigate(`/code?ws=${ws.id}`)} title="View code"><Code2 className="h-4 w-4" /></Button>
-          <Button variant="ghost" onClick={save} disabled={busy || !dirty}>Save</Button>
           <Button onClick={onRun}><Play className="h-4 w-4" /> Run</Button>
         </div>
       </div>

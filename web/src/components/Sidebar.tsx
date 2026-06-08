@@ -9,9 +9,9 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: "/models", label: "Models", icon: Sparkles },
 ];
 
-export function Sidebar({ crewaiVersion }: { crewaiVersion?: string }) {
+export function Sidebar({ crewaiVersion, onNavigate }: { crewaiVersion?: string; onNavigate?: () => void }) {
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-elevated">
+    <aside className="flex h-full w-56 shrink-0 flex-col border-r border-border bg-elevated">
       <div className="flex items-center gap-2 px-4 py-4">
         <div className="grid h-8 w-8 place-items-center rounded-lg bg-brand font-bold text-white">CF</div>
         <div>
@@ -25,6 +25,7 @@ export function Sidebar({ crewaiVersion }: { crewaiVersion?: string }) {
             key={n.to}
             to={n.to}
             end={n.end}
+            onClick={onNavigate}
             className={({ isActive }) =>
               `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${
                 isActive ? "bg-brand-soft text-ink" : "text-muted hover:bg-elevated2 hover:text-ink"
