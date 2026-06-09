@@ -8,7 +8,7 @@ import { useToast } from "../lib/toast";
 // (LiteLLM); we show a transparency note. Presets are just light suggestions.
 type Provider = {
   id: string; label: string; prefix: string; baseUrl: string;
-  custom?: boolean; needsKey: boolean; keyHelp: string; suggestions: string[];
+  custom?: boolean; noModelList?: boolean; needsKey: boolean; keyHelp: string; suggestions: string[];
 };
 
 const PROVIDERS: Provider[] = [
@@ -16,8 +16,9 @@ const PROVIDERS: Provider[] = [
     keyHelp: "platform.openai.com → API keys", suggestions: ["gpt-4o-mini", "gpt-4o", "o3", "o4-mini", "gpt-4.1"] },
   { id: "anthropic", label: "Anthropic", prefix: "anthropic/", baseUrl: "", needsKey: true,
     keyHelp: "console.anthropic.com → API keys", suggestions: ["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"] },
-  { id: "minimax", label: "MiniMax", prefix: "hosted_vllm/", baseUrl: "https://api.minimax.io/v1", needsKey: true,
-    keyHelp: "MiniMax platform → API key (OpenAI-compatible)", suggestions: ["MiniMax-M1", "MiniMax-Text-01", "abab6.5s-chat"] },
+  { id: "minimax", label: "MiniMax", prefix: "hosted_vllm/", baseUrl: "https://api.minimax.io/v1", needsKey: true, noModelList: true,
+    keyHelp: "platform.minimax.io → API key (OpenAI-compatible endpoint, no model-list API)",
+    suggestions: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2"] },
   { id: "gemini", label: "Google Gemini", prefix: "gemini/", baseUrl: "", needsKey: true,
     keyHelp: "aistudio.google.com → API key", suggestions: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"] },
   { id: "groq", label: "Groq", prefix: "groq/", baseUrl: "", needsKey: true,
@@ -129,7 +130,7 @@ export function Settings() {
             <div className="flex gap-2">
               <Input list="model-options" value={model} onChange={(e) => setModel(e.target.value)}
                 placeholder={provider.custom ? "hosted_vllm/your-model" : (provider.suggestions[0] || "model id")} />
-              <Button variant="ghost" onClick={refresh} disabled={busy}>↻ Refresh</Button>
+              {!provider.noModelList && <Button variant="ghost" onClick={refresh} disabled={busy}>↻ Refresh</Button>}
             </div>
             <datalist id="model-options">{options.map((m) => <option key={m} value={m} />)}</datalist>
             {model && (
@@ -167,7 +168,7 @@ export function Settings() {
               {test.msg}
             </div>
           )}
-          <p className="text-xs text-muted">{provider.keyHelp} · Tip: click <span className="text-ink">Refresh</span> to load the provider's current models.</p>
+          <p className="text-xs text-muted">{provider.keyHelp}{!provider.noModelList && <> · Tip: click <span className="text-ink">Refresh</span> to load current models.</>}</p>
         </div>
       </Card>
     </div>
