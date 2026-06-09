@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Code2, Download, Play, Plus, Trash2 } from "lucide-react";
 import {
-  api, type AgentSpec, type LlmSettings, type Manifest, type Persona, type TaskSpec, type ToolInfo, type Workspace,
+  api, type AgentSpec, type KnowledgeBase, type LlmSettings, type Manifest, type Persona, type TaskSpec, type ToolInfo, type Workspace,
 } from "../lib/api";
 import {
   Badge, Button, Card, CardHeader, Input, LabeledField, Modal, Select, Textarea, Toggle, Tooltip,
@@ -32,12 +32,14 @@ export function Builder() {
   const [inputsOpen, setInputsOpen] = useState(false);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [personaOpen, setPersonaOpen] = useState(false);
+  const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
 
   useEffect(() => {
     api.manifest().then(setManifest).catch(() => {});
     api.tools().then((d) => setTools(d.tools)).catch(() => {});
     api.getLlm().then((c) => { setLlm(c); setDryRun(!c.configured); }).catch(() => {});
     api.personas().then((d) => setPersonas(d.personas)).catch(() => {});
+    api.knowledgeBases().then((d) => setKbs(d.knowledge_bases)).catch(() => {});
   }, []);
   // No dead-end: if no workspace in the URL, open the last-used (or first) one.
   useEffect(() => {
@@ -187,6 +189,10 @@ export function Builder() {
             <div className="p-4">
               <SkillPicker all={tools} value={ws.skills ?? []} onChange={(v) => mutate((w) => { w.skills = v; })} />
               <p className="mt-2 text-xs text-muted">Get more in <Link to="/tools?tab=integrations" className="text-brand hover:underline">Tools → Integrations</Link>.</p>
+              <div className="mt-4 border-t border-border pt-3">
+                <div className="mb-1.5 text-xs font-medium text-muted">Workflow knowledge</div>
+                <KnowledgePicker all={kbs} value={ws.knowledge ?? []} onChange={(v) => mutate((w) => { w.knowledge = v; })} />
+              </div>
             </div>
           </Card>
           <Card>
@@ -274,6 +280,9 @@ export function Builder() {
                 </LabeledField>
                 <LabeledField label="Agent tools" tip="Tools only this agent can use, on top of any workflow-wide tools. Tools from integrations run live; built-in tools are also exported.">
                   <SkillPicker all={tools} value={agent.tools ?? []} onChange={(v) => mutate((w) => { w.agents[sel!.idx].tools = v; })} />
+                </LabeledField>
+                <LabeledField label="Knowledge" tip="Knowledge bases this agent can search at run time (plus any workflow-wide knowledge).">
+                  <KnowledgePicker all={kbs} value={(agent.knowledge as string[]) ?? []} onChange={(v) => mutate((w) => { w.agents[sel!.idx].knowledge = v; })} />
                 </LabeledField>
 
                 <div>
@@ -390,6 +399,27 @@ function InputsDialog({ inputs, onClose, onSubmit }: {
         </div>
       </div>
     </Modal>
+  );
+}
+
+function KnowledgePicker({ all, value, onChange }: { all: KnowledgeBase[]; value: string[]; onChange: (v: string[]) => void }) {
+  if (!all.length) {
+    return <p className="text-xs text-muted">No knowledge bases yet. Create one under <Link to="/knowledge" className="text-brand hover:underline">Knowledge</Link>.</p>;
+  }
+  return (
+    <div className="space-y-1">
+      {all.map((kb) => {
+        const on = value.includes(kb.id);
+        return (
+          <label key={kb.id} className="flex cursor-pointer items-center gap-2 text-sm">
+            <input type="checkbox" checked={on} className="accent-[var(--color-brand)]"
+              onChange={() => onChange(on ? value.filter((x) => x !== kb.id) : [...value, kb.id])} />
+            <span className="text-ink">{kb.name}</span>
+            <span className="text-xs text-muted">{kb.stats.chunks} chunks</span>
+          </label>
+        );
+      })}
+    </div>
   );
 }
 

@@ -54,6 +54,12 @@ def init() -> None:
                 );
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
                 CREATE TABLE IF NOT EXISTS personas (id TEXT PRIMARY KEY, data TEXT, seeded INTEGER DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS knowledge_bases (id TEXT PRIMARY KEY, name TEXT, data TEXT);
+                CREATE TABLE IF NOT EXISTS kb_sources (id TEXT PRIMARY KEY, kb_id TEXT, data TEXT);
+                CREATE TABLE IF NOT EXISTS kb_chunks (
+                    kb_id TEXT, chunk_id TEXT, source_id TEXT, text TEXT, emb TEXT, meta TEXT,
+                    PRIMARY KEY (kb_id, chunk_id)
+                );
                 """
             )
         _seed_if_empty()
@@ -94,6 +100,68 @@ def save_persona(p: dict[str, Any]) -> dict[str, Any]:
 def delete_persona(pid: str) -> None:
     with _conn() as c:
         c.execute("DELETE FROM personas WHERE id=?", (pid,))
+
+
+# -- knowledge bases ---------------------------------------------------------
+def list_kbs() -> list[dict[str, Any]]:
+    with _conn() as c:
+        rows = c.execute("SELECT data FROM knowledge_bases ORDER BY name").fetchall()
+    return [json.loads(r["data"]) for r in rows]
+
+
+def get_kb(kb_id: str) -> dict[str, Any] | None:
+    with _conn() as c:
+        row = c.execute("SELECT data FROM knowledge_bases WHERE id=?", (kb_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def save_kb(kb: dict[str, Any]) -> dict[str, Any]:
+    with _conn() as c:
+        c.execute("INSERT INTO knowledge_bases (id, name, data) VALUES (?,?,?) "
+                  "ON CONFLICT(id) DO UPDATE SET name=excluded.name, data=excluded.data",
+                  (kb["id"], kb.get("name", "KB"), json.dumps(kb)))
+    return kb
+
+
+def delete_kb(kb_id: str) -> None:
+    with _conn() as c:
+        c.execute("DELETE FROM knowledge_bases WHERE id=?", (kb_id,))
+        c.execute("DELETE FROM kb_sources WHERE kb_id=?", (kb_id,))
+        c.execute("DELETE FROM kb_chunks WHERE kb_id=?", (kb_id,))
+
+
+def list_sources(kb_id: str) -> list[dict[str, Any]]:
+    with _conn() as c:
+        rows = c.execute("SELECT data FROM kb_sources WHERE kb_id=?", (kb_id,)).fetchall()
+    return [json.loads(r["data"]) for r in rows]
+
+
+def save_source(src: dict[str, Any]) -> dict[str, Any]:
+    with _conn() as c:
+        c.execute("INSERT INTO kb_sources (id, kb_id, data) VALUES (?,?,?) "
+                  "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                  (src["id"], src["kb_id"], json.dumps(src)))
+    return src
+
+
+def add_chunks(kb_id: str, source_id: str, rows: list[tuple[str, str, list[float], dict]]) -> None:
+    with _conn() as c:
+        c.executemany(
+            "INSERT OR REPLACE INTO kb_chunks (kb_id, chunk_id, source_id, text, emb, meta) VALUES (?,?,?,?,?,?)",
+            [(kb_id, cid, source_id, text, json.dumps(emb), json.dumps(meta)) for cid, text, emb, meta in rows],
+        )
+
+
+def get_chunks(kb_id: str) -> list[dict[str, Any]]:
+    with _conn() as c:
+        rows = c.execute("SELECT chunk_id, source_id, text, emb, meta FROM kb_chunks WHERE kb_id=?", (kb_id,)).fetchall()
+    return [{"chunk_id": r["chunk_id"], "source_id": r["source_id"], "text": r["text"],
+             "emb": json.loads(r["emb"]), "meta": json.loads(r["meta"])} for r in rows]
+
+
+def count_chunks(kb_id: str) -> int:
+    with _conn() as c:
+        return c.execute("SELECT COUNT(*) FROM kb_chunks WHERE kb_id=?", (kb_id,)).fetchone()[0]
 
 
 # -- workspaces --------------------------------------------------------------

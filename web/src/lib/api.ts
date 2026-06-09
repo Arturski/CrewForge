@@ -39,6 +39,7 @@ export interface Workspace {
   inputs?: { name: string; description?: string; default?: string }[]; // run-time params
   planning?: boolean; // crew plans before executing
   memory?: boolean; // crew memory (live runs)
+  knowledge?: string[]; // workflow-level knowledge base ids
 }
 
 export interface RunEvent {
@@ -67,6 +68,16 @@ export interface Persona {
 export interface TemplateSummary {
   id: string; name: string; description: string; agents: number; tasks: number;
 }
+
+export interface KnowledgeSource {
+  id: string; kb_id: string; kind: string; ref: string;
+  status: "processing" | "ready" | "error"; chunks: number; error?: string | null;
+}
+export interface KnowledgeBase {
+  id: string; name: string; description: string; embedder: string; created: string;
+  stats: { sources: number; chunks: number }; sources?: KnowledgeSource[];
+}
+export interface SearchHit { text: string; score: number; source: string }
 
 export interface ToolInfo {
   name: string; description: string;
@@ -133,6 +144,14 @@ export const api = {
     req<{ ok: boolean }>("/api/settings/llm", json("PUT", cfg)),
   testLlm: (cfg: Partial<{ model: string; base_url: string; api_key: string }>) =>
     req<{ ok: boolean; sample?: string; error?: string }>("/api/settings/llm/test", json("POST", cfg)),
+
+  knowledgeBases: () => req<{ knowledge_bases: KnowledgeBase[] }>("/api/knowledge"),
+  createKnowledge: (name: string, description = "") => req<KnowledgeBase>("/api/knowledge", json("POST", { name, description })),
+  knowledgeBase: (id: string) => req<KnowledgeBase>(`/api/knowledge/${id}`),
+  deleteKnowledge: (id: string) => req<{ ok: boolean }>(`/api/knowledge/${id}`, { method: "DELETE" }),
+  addKbSource: (id: string, body: { kind: string; text?: string; filename?: string; content_b64?: string }) =>
+    req<KnowledgeSource>(`/api/knowledge/${id}/sources`, json("POST", body)),
+  searchKb: (id: string, q: string) => req<{ results: SearchHit[] }>(`/api/knowledge/${id}/search`, json("POST", { q })),
 
   registry: (q: string) => req<{ servers: RegistryServer[]; error?: string }>(`/api/registry?q=${encodeURIComponent(q)}`),
   mcpServers: () => req<{ servers: McpServer[] }>("/api/mcp"),

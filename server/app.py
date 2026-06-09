@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import json
 import uuid
@@ -13,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import knowledge as knowledge_mod
 from . import mcp, registry, store
 from . import secrets as secrets_mod
 from . import templates as templates_mod
@@ -78,6 +80,52 @@ def templates() -> dict[str, Any]:
          "agents": len(t["spec"]["agents"]), "tasks": len(t["spec"]["tasks"])}
         for t in templates_mod.TEMPLATES
     ]}
+
+
+# ---- Knowledge bases -------------------------------------------------------
+@app.get("/api/knowledge")
+def list_knowledge() -> dict[str, Any]:
+    kbs = knowledge_mod.list_kbs()
+    for kb in kbs:
+        kb["stats"] = {"sources": len(store.list_sources(kb["id"])), "chunks": store.count_chunks(kb["id"])}
+    return {"knowledge_bases": kbs}
+
+
+@app.post("/api/knowledge")
+async def create_knowledge(req: Request) -> dict[str, Any]:
+    b = await req.json() if await req.body() else {}
+    return knowledge_mod.create_kb(b.get("name", ""), b.get("description", ""))
+
+
+@app.get("/api/knowledge/{kb_id}")
+def get_knowledge(kb_id: str) -> dict[str, Any]:
+    kb = knowledge_mod.get_kb(kb_id)
+    if not kb:
+        raise HTTPException(404, "knowledge base not found")
+    return kb
+
+
+@app.delete("/api/knowledge/{kb_id}")
+def delete_knowledge(kb_id: str) -> dict[str, Any]:
+    knowledge_mod.delete_kb(kb_id)
+    return {"ok": True}
+
+
+@app.post("/api/knowledge/{kb_id}/sources")
+async def add_kb_source(kb_id: str, req: Request) -> dict[str, Any]:
+    if not store.get_kb(kb_id):
+        raise HTTPException(404, "knowledge base not found")
+    b = await req.json()
+    if b.get("kind") == "file":
+        content = base64.b64decode((b.get("content_b64") or "").split(",")[-1] or "")
+        return knowledge_mod.add_source(kb_id, "file", filename=b.get("filename"), content=content)
+    return knowledge_mod.add_source(kb_id, "text", text=b.get("text", ""))
+
+
+@app.post("/api/knowledge/{kb_id}/search")
+async def search_knowledge(kb_id: str, req: Request) -> dict[str, Any]:
+    b = await req.json() if await req.body() else {}
+    return {"results": knowledge_mod.search(kb_id, b.get("q") or b.get("query", ""))}
 
 
 # ---- Skill marketplace (official MCP registry) -----------------------------

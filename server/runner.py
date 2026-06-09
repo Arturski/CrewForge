@@ -166,6 +166,27 @@ class RunManager:
                     except Exception:  # noqa: BLE001
                         pass
 
+            # Knowledge-base tools (keyless local embeddings → attach in any mode).
+            wf_kbs = list(spec.get("knowledge") or [])
+            if any(a.get("knowledge") for a in spec.get("agents", [])) or wf_kbs:
+                from .compiler.knowledge_tool import make_tool
+                kb_cache: dict[str, Any] = {}
+
+                def _kb_tool(kid: str):
+                    if kid not in kb_cache:
+                        kb = store.get_kb(kid)
+                        kb_cache[kid] = make_tool(kb) if kb else None
+                    return kb_cache[kid]
+
+                for a in spec.get("agents", []):
+                    ids = list(dict.fromkeys(list(a.get("knowledge") or []) + wf_kbs))
+                    ktools = [t for t in (_kb_tool(i) for i in ids) if t]
+                    if ktools:
+                        agent_tools = agent_tools or {}
+                        agent_tools[a["id"]] = (agent_tools.get(a["id"]) or []) + ktools
+                if wf_kbs or any(a.get("knowledge") for a in spec.get("agents", [])):
+                    emit("knowledge.attached", count=sum(len(v) for v in (agent_tools or {}).values()))
+
             crew = build_crew(spec, llm=llm, hitl_gate=hitl_gate, agent_tools=agent_tools,
                               agent_llms=agent_llms)
 

@@ -73,6 +73,24 @@ class _StubLLM(BaseLLM):
         return False
 
 
+def test_vector_chunk_and_rank():
+    from server.knowledge import vector
+    chunks = vector.chunk(" ".join(["word"] * 500), words=220, overlap=20)
+    assert len(chunks) >= 2  # long text splits into multiple chunks
+    items = [{"id": "a", "emb": [1.0, 0.0, 0.0]}, {"id": "b", "emb": [0.0, 1.0, 0.0]}]
+    top = vector.rank([0.9, 0.1, 0.0], items, k=1)  # closest to 'a'
+    assert top[0]["id"] == "a" and top[0]["score"] > 0.9
+
+
+def test_knowledge_kb_crud():
+    store.init()
+    kb = {"id": "kb-test", "name": "T", "stats": {}}
+    store.save_kb(kb)
+    assert store.get_kb("kb-test")["name"] == "T"
+    store.delete_kb("kb-test")
+    assert store.get_kb("kb-test") is None
+
+
 def test_adapter_phase3_features():
     spec = {
         "agents": [{"id": "a1", "role": "Analyst", "goal": "g", "backstory": "b"}],

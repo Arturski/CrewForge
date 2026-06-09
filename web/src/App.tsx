@@ -11,6 +11,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard").then((m) => ({ default:
 const Builder = lazy(() => import("./pages/Builder").then((m) => ({ default: m.Builder })));
 const Runs = lazy(() => import("./pages/Runs").then((m) => ({ default: m.Runs })));
 const Tools = lazy(() => import("./pages/Tools").then((m) => ({ default: m.Tools })));
+const Knowledge = lazy(() => import("./pages/Knowledge").then((m) => ({ default: m.Knowledge })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const Code = lazy(() => import("./pages/Code").then((m) => ({ default: m.Code })));
 
@@ -47,6 +48,7 @@ export default function App() {
                 <Route path="/builder" element={<Builder />} />
                 <Route path="/runs" element={<Runs />} />
                 <Route path="/tools" element={<Tools />} />
+              <Route path="/knowledge" element={<Knowledge />} />
                 <Route path="/skills" element={<Navigate to="/tools" replace />} />
                 <Route path="/mcp" element={<Navigate to="/tools?tab=integrations" replace />} />
                 <Route path="/models" element={<Settings />} />
