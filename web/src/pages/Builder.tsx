@@ -109,6 +109,19 @@ export function Builder() {
     else doRun({});
   }
 
+  const refreshPersonas = () => api.personas().then((d) => setPersonas(d.personas)).catch(() => {});
+  async function saveAsPersona() {
+    if (sel?.kind !== "agent" || !ws) return;
+    const a = ws.agents[sel.idx];
+    const name = window.prompt("Save this agent as a reusable persona. Name:", a.role);
+    if (!name) return;
+    try {
+      await api.savePersona({ name, role: a.role, goal: a.goal, backstory: a.backstory, suggested_tools: a.tools ?? [] });
+      await refreshPersonas();
+      toast(`Saved persona "${name}"`, "ok");
+    } catch (e) { toast(String(e), "error"); }
+  }
+
   if (!wsId) return <Empty />;
   if (!ws || !manifest) return <div className="text-sm text-muted">Loading…</div>;
 
@@ -233,7 +246,12 @@ export function Builder() {
             <>
               <CardHeader title={`Agent: ${agent.role || "Untitled"}`}
                 sub="Describe the agent in plain language. Hover any ? for help."
-                right={<Button variant="ghost" size="sm" onClick={() => setPersonaOpen(true)}>✨ Start from persona</Button>} />
+                right={
+                  <span className="flex gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => setPersonaOpen(true)}>✨ Persona</Button>
+                    <Button variant="ghost" size="sm" onClick={saveAsPersona}>Save as persona</Button>
+                  </span>
+                } />
               <div className="space-y-4 p-5">
                 <LabeledField label="Role" tip="A short title for what this agent is, e.g. 'Senior Researcher'. Shapes how it behaves.">
                   <Input value={agent.role} onChange={(e) => mutate((w) => { (w.agents[sel!.idx]).role = e.target.value; })} />
@@ -337,6 +355,7 @@ export function Builder() {
       )}
       {personaOpen && sel?.kind === "agent" && (
         <PersonaModal personas={personas} onClose={() => setPersonaOpen(false)}
+          onChanged={refreshPersonas}
           onPick={(p) => {
             mutate((w) => {
               const a = w.agents[sel.idx];
@@ -374,22 +393,49 @@ function InputsDialog({ inputs, onClose, onSubmit }: {
   );
 }
 
-function PersonaModal({ personas, onClose, onPick }: {
-  personas: Persona[]; onClose: () => void; onPick: (p: Persona) => void;
+function PersonaModal({ personas, onClose, onPick, onChanged }: {
+  personas: Persona[]; onClose: () => void; onPick: (p: Persona) => void; onChanged: () => void;
 }) {
+  const toast = useToast();
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState({ name: "", role: "", goal: "", backstory: "" });
+
+  async function create() {
+    if (!draft.name) return;
+    try { await api.savePersona({ ...draft }); await onChanged(); setCreating(false); setDraft({ name: "", role: "", goal: "", backstory: "" }); toast("Persona created", "ok"); }
+    catch (e) { toast(String(e), "error"); }
+  }
+  async function remove(id: string) {
+    try { await api.deletePersona(id); await onChanged(); } catch (e) { toast(String(e), "error"); }
+  }
+
   return (
-    <Modal title="Start from a persona" onClose={onClose}>
+    <Modal title="Personas" onClose={onClose}>
       <div className="max-h-[60vh] space-y-2 overflow-y-auto">
-        <p className="text-xs text-muted">Pick a detailed, ready-made persona — it fills this agent's role, goal, backstory, and suggested tools.</p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted">Click to apply to this agent (role, goal, backstory, tools).</p>
+          <button onClick={() => setCreating((s) => !s)} className="text-sm text-brand hover:underline">{creating ? "Cancel" : "+ New"}</button>
+        </div>
+        {creating && (
+          <div className="space-y-2 rounded-lg border border-border bg-canvas p-3">
+            <Input placeholder="Name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+            <Input placeholder="Role" value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} />
+            <Input placeholder="Goal" value={draft.goal} onChange={(e) => setDraft({ ...draft, goal: e.target.value })} />
+            <Textarea placeholder="Backstory" value={draft.backstory} onChange={(e) => setDraft({ ...draft, backstory: e.target.value })} />
+            <Button onClick={create} disabled={!draft.name}>Create persona</Button>
+          </div>
+        )}
         {personas.map((p) => (
-          <button key={p.id} onClick={() => onPick(p)}
-            className="block w-full rounded-lg border border-border bg-canvas p-3 text-left transition hover:border-brand">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-ink">{p.name}</span>
-              {p.tags.map((t) => <Badge key={t} tone="muted">{t}</Badge>)}
-            </div>
-            <div className="mt-1 line-clamp-2 text-xs text-muted">{p.backstory}</div>
-          </button>
+          <div key={p.id} className="group flex items-start gap-2 rounded-lg border border-border bg-canvas p-3 transition hover:border-brand">
+            <button onClick={() => onPick(p)} className="min-w-0 flex-1 text-left">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-ink">{p.name}</span>
+                {p.tags.map((t) => <Badge key={t} tone="muted">{t}</Badge>)}
+              </div>
+              <div className="mt-1 line-clamp-2 text-xs text-muted">{p.backstory}</div>
+            </button>
+            <button onClick={() => remove(p.id)} className="shrink-0 text-muted opacity-0 transition group-hover:opacity-100 hover:text-danger" title="Delete persona"><Trash2 className="h-3.5 w-3.5" /></button>
+          </div>
         ))}
       </div>
     </Modal>

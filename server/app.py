@@ -14,7 +14,6 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 
 from . import mcp, registry, store
-from . import personas as personas_mod
 from . import secrets as secrets_mod
 from . import templates as templates_mod
 from .compiler.exporter import export_files, export_zip
@@ -53,7 +52,23 @@ def tools() -> dict[str, Any]:
 
 @app.get("/api/personas")
 def personas() -> dict[str, Any]:
-    return {"personas": personas_mod.PERSONAS}
+    return {"personas": store.list_personas()}
+
+
+@app.post("/api/personas")
+async def create_persona(req: Request) -> dict[str, Any]:
+    p = await req.json()
+    if not p.get("id"):
+        p["id"] = f"persona-{uuid.uuid4().hex[:8]}"
+    p.setdefault("tags", [])
+    p.setdefault("suggested_tools", [])
+    return store.save_persona(p)
+
+
+@app.delete("/api/personas/{persona_id}")
+def delete_persona(persona_id: str) -> dict[str, Any]:
+    store.delete_persona(persona_id)
+    return {"ok": True}
 
 
 @app.get("/api/templates")

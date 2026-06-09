@@ -120,6 +120,8 @@ export const api = {
   createWorkspace: (name: string, template?: string) =>
     req<Workspace>("/api/workspaces", json("POST", { name, ...(template ? { template } : {}) })),
   personas: () => req<{ personas: Persona[] }>("/api/personas"),
+  savePersona: (p: Partial<Persona>) => req<Persona>("/api/personas", json("POST", p)),
+  deletePersona: (id: string) => req<{ ok: boolean }>(`/api/personas/${id}`, { method: "DELETE" }),
   templates: () => req<{ templates: TemplateSummary[] }>("/api/templates"),
   saveWorkspace: (ws: Workspace) => req<Workspace>(`/api/workspaces/${ws.id}`, json("PUT", ws)),
   deleteWorkspace: (id: string) => req<{ ok: boolean }>(`/api/workspaces/${id}`, { method: "DELETE" }),

@@ -53,6 +53,7 @@ def init() -> None:
                     PRIMARY KEY (run_id, seq)
                 );
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE IF NOT EXISTS personas (id TEXT PRIMARY KEY, data TEXT, seeded INTEGER DEFAULT 0);
                 """
             )
         _seed_if_empty()
@@ -60,15 +61,39 @@ def init() -> None:
 
 
 def _seed_if_empty() -> None:
+    from .personas import PERSONAS  # local import to avoid cycle
     from .seed import WORKSPACES  # local import to avoid cycle
     with _conn() as c:
-        n = c.execute("SELECT COUNT(*) FROM workspaces").fetchone()[0]
-        if n == 0:
+        if c.execute("SELECT COUNT(*) FROM workspaces").fetchone()[0] == 0:
             for ws in WORKSPACES.values():
                 c.execute(
                     "INSERT INTO workspaces (id, name, updated_at, data) VALUES (?,?,?,?)",
                     (ws["id"], ws["name"], _now(), json.dumps(ws)),
                 )
+        if c.execute("SELECT COUNT(*) FROM personas").fetchone()[0] == 0:
+            for p in PERSONAS:
+                c.execute("INSERT INTO personas (id, data, seeded) VALUES (?,?,1)",
+                          (p["id"], json.dumps(p)))
+
+
+# -- personas ----------------------------------------------------------------
+def list_personas() -> list[dict[str, Any]]:
+    with _conn() as c:
+        rows = c.execute("SELECT data FROM personas ORDER BY seeded DESC, id").fetchall()
+    return [json.loads(r["data"]) for r in rows]
+
+
+def save_persona(p: dict[str, Any]) -> dict[str, Any]:
+    with _conn() as c:
+        c.execute("INSERT INTO personas (id, data, seeded) VALUES (?,?,0) "
+                  "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                  (p["id"], json.dumps(p)))
+    return p
+
+
+def delete_persona(pid: str) -> None:
+    with _conn() as c:
+        c.execute("DELETE FROM personas WHERE id=?", (pid,))
 
 
 # -- workspaces --------------------------------------------------------------
