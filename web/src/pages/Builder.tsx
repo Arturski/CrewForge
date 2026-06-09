@@ -141,7 +141,7 @@ export function Builder() {
             onChange={(e) => mutate((w) => { w.name = e.target.value; })}
           />
           <div className="mt-1 flex items-center gap-2 text-xs text-muted">
-            <span>process</span>
+            <span className="flex items-center gap-1">process<Tooltip text="This workflow IS a crew — a team of agents working together. Sequential runs tasks in order; Hierarchical adds a manager agent that delegates to the others." /></span>
             <Select className="w-auto py-0.5" value={ws.process}
               onChange={(e) => mutate((w) => { w.process = e.target.value; })}>
               <option value="sequential">sequential</option>
@@ -155,8 +155,11 @@ export function Builder() {
             <Badge tone={dryRun ? "warn" : "ok"}>{dryRun ? "dry-run" : (llm?.model ? llm.model.split("/").pop() : "no model")}</Badge>
           </Link>
           <div className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1">
-            <span className="text-xs text-muted">Dry run</span>
-            <Toggle checked={dryRun} onChange={setDryRun} />
+            <span className="flex items-center gap-1 text-xs text-muted">Dry run<Tooltip text="ON = a free mock LLM (no key, no cost) for testing the flow. OFF = run with your configured model. Set a model under Models first." /></span>
+            <Toggle checked={dryRun} onChange={(v) => {
+              if (!v && !llm?.configured) { toast("No model set yet — configure one under Models to run live."); return; }
+              setDryRun(v);
+            }} />
           </div>
           <Button variant="ghost" size="icon" onClick={() => window.open(api.exportUrl(ws.id), "_blank")} title="Export project"><Download className="h-4 w-4" /></Button>
           <Button variant="ghost" size="icon" onClick={() => navigate(`/code?ws=${ws.id}`)} title="View code"><Code2 className="h-4 w-4" /></Button>
@@ -205,8 +208,12 @@ export function Builder() {
             </div>
           </Card>
           <Card>
-            <CardHeader title="Run inputs" sub="Variables you fill in at run time. Reference as {name} in tasks." />
+            <CardHeader title="Run inputs" sub="Reusable variables you fill in each run." />
             <div className="space-y-2 p-4">
+              <p className="rounded-md bg-elevated2 px-2.5 py-2 text-xs text-muted">
+                Add a variable (e.g. <code className="text-ink">topic</code>), then write <code className="text-ink">{"{topic}"}</code> in a task's
+                Description or Expected output. You'll be prompted to fill it in when you Run.
+              </p>
               {(ws.inputs ?? []).map((inp, i) => (
                 <div key={i} className="flex items-center gap-2">
                   <Input className="flex-1" placeholder="topic" value={inp.name}
@@ -317,6 +324,9 @@ export function Builder() {
                 <LabeledField label="Description" tip="Exactly what to do in this step.">
                   <Textarea value={task.description} onChange={(e) => mutate((w) => { w.tasks[sel!.idx].description = e.target.value; })} />
                 </LabeledField>
+                {ws.inputs?.some((i) => i.name) && (
+                  <p className="-mt-2 text-xs text-muted">Insert run inputs: {ws.inputs.filter((i) => i.name).map((i) => `{${i.name}}`).join("  ")}</p>
+                )}
                 <LabeledField label="Expected output" tip="What a great result looks like. The agent is graded against this.">
                   <Textarea value={task.expected_output} onChange={(e) => mutate((w) => { w.tasks[sel!.idx].expected_output = e.target.value; })} />
                 </LabeledField>

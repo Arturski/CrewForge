@@ -17,16 +17,16 @@ const PROVIDERS: Provider[] = [
     models: [{ label: "GPT-4o mini", value: "openai/gpt-4o-mini" }, { label: "GPT-4o", value: "openai/gpt-4o" }, { label: "o3-mini", value: "openai/o3-mini" }] },
   { id: "anthropic", label: "Anthropic", baseUrl: "", needsKey: true, keyHelp: "console.anthropic.com → API keys",
     models: [{ label: "Claude 3.5 Sonnet", value: "anthropic/claude-3-5-sonnet-latest" }, { label: "Claude 3.5 Haiku", value: "anthropic/claude-3-5-haiku-latest" }] },
-  { id: "minimax", label: "MiniMax", baseUrl: "https://api.minimax.io/v1", needsKey: true, keyHelp: "MiniMax platform → API key",
-    models: [{ label: "MiniMax-M1", value: "openai/MiniMax-M1" }, { label: "MiniMax-Text-01", value: "openai/MiniMax-Text-01" }, { label: "abab6.5s-chat", value: "openai/abab6.5s-chat" }] },
+  { id: "minimax", label: "MiniMax", baseUrl: "https://api.minimax.io/v1", needsKey: true, keyHelp: "MiniMax platform → API key (OpenAI-compatible endpoint)",
+    models: [{ label: "MiniMax-M1", value: "hosted_vllm/MiniMax-M1" }, { label: "MiniMax-Text-01", value: "hosted_vllm/MiniMax-Text-01" }, { label: "abab6.5s-chat", value: "hosted_vllm/abab6.5s-chat" }] },
   { id: "gemini", label: "Google Gemini", baseUrl: "", needsKey: true, keyHelp: "aistudio.google.com → API key",
     models: [{ label: "Gemini 1.5 Pro", value: "gemini/gemini-1.5-pro" }, { label: "Gemini 1.5 Flash", value: "gemini/gemini-1.5-flash" }] },
   { id: "groq", label: "Groq", baseUrl: "", needsKey: true, keyHelp: "console.groq.com → API keys",
     models: [{ label: "Llama 3.3 70B", value: "groq/llama-3.3-70b-versatile" }] },
   { id: "ollama", label: "Ollama (local)", baseUrl: "http://localhost:11434", needsKey: false, keyHelp: "No key needed — runs locally",
     models: [{ label: "Llama 3.1", value: "ollama/llama3.1" }, { label: "Qwen 2.5", value: "ollama/qwen2.5" }] },
-  { id: "custom", label: "Custom", baseUrl: "https://your-endpoint/v1", custom: true, needsKey: true,
-    keyHelp: "Any OpenAI-compatible endpoint (vLLM, LM Studio, a proxy…). Enter the full model id.",
+  { id: "custom", label: "Custom (OpenAI-compatible)", baseUrl: "https://your-endpoint/v1", custom: true, needsKey: true,
+    keyHelp: "Any OpenAI-compatible endpoint (vLLM, LM Studio, a proxy…). Use the prefix hosted_vllm/<model>.",
     models: [] },
 ];
 
@@ -115,7 +115,7 @@ export function Settings() {
         <div className="space-y-4 p-5">
           <LabeledField label="Model" tip="The model that runs your agents. Pick one for this provider.">
             {provider.custom ? (
-              <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="openai/your-model" />
+              <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="hosted_vllm/your-model" />
             ) : (
               <Select value={model} onChange={(e) => setModel(e.target.value)}>
                 {provider.models.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
