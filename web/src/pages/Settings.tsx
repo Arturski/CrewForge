@@ -73,9 +73,8 @@ export function Settings() {
     setBusy(true);
     try {
       const d = await api.providerModels({ provider: provider.id, base_url: baseUrl, ...(apiKey ? { api_key: apiKey } : {}) });
-      if (d.error) toast(`Couldn't load models: ${d.error}`, "error");
-      setFetched(d.models);
-      if (d.models.length) toast(`Loaded ${d.models.length} live models`, "ok");
+      if (d.models.length) { setFetched(d.models); toast(`Loaded ${d.models.length} live models`, "ok"); }
+      else toast(`${provider.label} didn't return a model list (it may not support /models). Just type the model id, then use Test connection.`, "error");
     } catch (e) { toast(String(e), "error"); }
     finally { setBusy(false); }
   }
