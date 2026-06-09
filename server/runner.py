@@ -11,7 +11,6 @@ import time
 import uuid
 from typing import Any
 
-from crewai import LLM
 from crewai.events import crewai_event_bus
 from crewai.events.types.agent_events import (
     AgentExecutionCompletedEvent,
@@ -29,8 +28,7 @@ from crewai.events.types.tool_usage_events import (
     ToolUsageStartedEvent,
 )
 
-from . import mcp, store
-from . import secrets as secrets_mod
+from . import llms, mcp, store
 from .compiler.adapter import FakeLLM, build_crew
 
 
@@ -63,20 +61,11 @@ class RunManager:
     def __init__(self) -> None:
         self.runs: dict[str, dict[str, Any]] = {}
 
-    def _build_llm(self, dry_run: bool):
+    def _build_llm(self, dry_run: bool, llm_id: str | None = None):
         if dry_run:
             return FakeLLM(), True
-        cfg = store.get_setting("llm")
-        if not cfg or not cfg.get("model"):
-            return FakeLLM(), True  # no provider configured -> safe dry-run fallback
-        kwargs: dict[str, Any] = {"model": cfg["model"]}
-        if cfg.get("api_key"):
-            kwargs["api_key"] = secrets_mod.dec(cfg["api_key"])
-        if cfg.get("base_url"):
-            kwargs["base_url"] = cfg["base_url"]
-        if cfg.get("temperature") is not None:
-            kwargs["temperature"] = cfg["temperature"]
-        return LLM(**kwargs), False
+        built = llms.build(llm_id)  # configured connection (or default)
+        return (built, False) if built is not None else (FakeLLM(), True)
 
     def start(self, spec: dict[str, Any], *, dry_run: bool = True,
               inputs: dict[str, Any] | None = None) -> str:
@@ -121,7 +110,7 @@ class RunManager:
 
         adapters: list = []
         try:
-            llm, effective_dry = self._build_llm(dry_run)
+            llm, effective_dry = self._build_llm(dry_run, spec.get("llm_id"))
             rec["dry_run"] = effective_dry
 
             # Live runs: connect MCP servers and attach their tools to agents.
@@ -148,23 +137,14 @@ class RunManager:
                     except Exception as e:  # noqa: BLE001
                         emit("mcp.error", error=str(e)[:200])
 
-            # Per-agent model overrides (live runs reuse the configured key/base_url).
+            # Per-agent LLM overrides: each agent can pick a configured connection.
             agent_llms: dict[str, Any] = {}
             if not effective_dry:
-                cfg = store.get_setting("llm") or {}
                 for a in spec.get("agents", []):
-                    model = a.get("llm_model")
-                    if not model:
-                        continue
-                    kw: dict[str, Any] = {"model": model}
-                    if cfg.get("api_key"):
-                        kw["api_key"] = secrets_mod.dec(cfg["api_key"])
-                    if cfg.get("base_url"):
-                        kw["base_url"] = cfg["base_url"]
-                    try:
-                        agent_llms[a["id"]] = LLM(**kw)
-                    except Exception:  # noqa: BLE001
-                        pass
+                    if a.get("llm_id"):
+                        built = llms.build(a["llm_id"])
+                        if built is not None:
+                            agent_llms[a["id"]] = built
 
             # Knowledge-base tools (keyless local embeddings → attach in any mode).
             wf_kbs = list(spec.get("knowledge") or [])

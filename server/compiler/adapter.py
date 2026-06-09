@@ -134,8 +134,12 @@ def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None,
         "tasks": tasks,
         "process": process,
         "verbose": False,
-        "planning": bool(spec.get("planning")),
     }
+    if spec.get("planning") and live:
+        # CrewAI's planner needs a real model (structured output) + defaults to
+        # OpenAI unless we pass the configured LLM. Skipped in dry-run.
+        crew_kwargs["planning"] = True
+        crew_kwargs["planning_llm"] = llm
     if live and spec.get("memory"):
         crew_kwargs["memory"] = True
     if process == Process.hierarchical:

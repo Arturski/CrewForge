@@ -15,8 +15,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 
 from . import knowledge as knowledge_mod
+from . import llms as llms_mod
 from . import mcp, registry, store
-from . import secrets as secrets_mod
 from . import templates as templates_mod
 from .compiler.exporter import export_files, export_zip
 from .compiler.manifest import build_manifest
@@ -164,32 +164,97 @@ def delete_mcp(server_id: str) -> dict[str, Any]:
     return {"ok": True}
 
 
-# ---- settings --------------------------------------------------------------
+# ---- LLM connections (multiple, selectable per workflow/agent) -------------
+@app.get("/api/llms")
+def list_llms() -> dict[str, Any]:
+    return llms_mod.list_public()
+
+
+@app.post("/api/llms")
+async def save_llm(req: Request) -> dict[str, Any]:
+    body = await req.json()
+    if not body.get("model"):
+        raise HTTPException(400, "model is required")
+    return llms_mod.upsert(body)
+
+
+@app.delete("/api/llms/{llm_id}")
+def remove_llm(llm_id: str) -> dict[str, Any]:
+    llms_mod.delete(llm_id)
+    return {"ok": True}
+
+
+@app.put("/api/llms/default")
+async def set_default_llm(req: Request) -> dict[str, Any]:
+    body = await req.json()
+    llms_mod.set_default(body.get("id", ""))
+    return {"ok": True}
+
+
+def _key_for(b: dict[str, Any]) -> str | None:
+    key = b.get("api_key")
+    if not key:
+        cfg = llms_mod.resolve(b.get("id"))  # specific connection, else default
+        key = cfg.get("api_key") if cfg else None
+    return key
+
+
+@app.post("/api/llms/models")
+async def provider_models(req: Request) -> dict[str, Any]:
+    from . import providers
+    b = await req.json() if await req.body() else {}
+    try:
+        return {"models": providers.fetch_models(b.get("provider", "openai"), b.get("base_url", ""), _key_for(b))}
+    except Exception as e:  # noqa: BLE001
+        return {"models": [], "error": f"{type(e).__name__}: {e}"[:200]}
+
+
+@app.post("/api/llms/test")
+async def test_llm(req: Request) -> dict[str, Any]:
+    from crewai import LLM
+    b = await req.json() if await req.body() else {}
+    model, base_url, key = b.get("model"), b.get("base_url", ""), b.get("api_key")
+    if (not model or not key) and b.get("id"):
+        cfg = llms_mod.resolve(b["id"]) or {}
+        model = model or cfg.get("model")
+        base_url = base_url or cfg.get("base_url", "")
+        key = key or cfg.get("api_key")
+    if not model:
+        raise HTTPException(400, "set a model first")
+    kwargs: dict[str, Any] = {"model": model}
+    if key:
+        kwargs["api_key"] = key
+    if base_url:
+        kwargs["base_url"] = base_url
+    try:
+        out = LLM(**kwargs).call("Reply with exactly the word: ok")
+        return {"ok": True, "sample": str(out)[:120]}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
+
+
+# ---- settings (compat shims over the LLM list; current single-LLM UI uses these)
 @app.get("/api/settings/llm")
 def get_llm_settings() -> dict[str, Any]:
-    cfg = store.get_setting("llm") or {}
-    return {
-        "configured": bool(cfg.get("model")),
-        "model": cfg.get("model", ""),
-        "base_url": cfg.get("base_url", ""),
-        "temperature": cfg.get("temperature"),
-        "api_key_set": bool(cfg.get("api_key")),
-    }
+    pub = llms_mod.list_public()
+    default = next((x for x in pub["llms"] if x["id"] == pub["default"]), None)
+    return {"configured": bool(default), "model": default["model"] if default else "",
+            "base_url": default["base_url"] if default else "",
+            "temperature": default.get("temperature") if default else None,
+            "api_key_set": bool(default)}
 
 
 @app.put("/api/settings/llm")
 async def put_llm_settings(req: Request) -> dict[str, Any]:
     body = await req.json()
-    cfg = store.get_setting("llm") or {}
-    for k in ("model", "base_url", "temperature"):
-        if k in body:
-            cfg[k] = body[k]
-    # only overwrite the key when a non-empty value is sent (keeps existing key on edits)
+    default_id = llms_mod.list_public()["default"]
+    cfg: dict[str, Any] = {"id": default_id, "name": body.get("model", "Default"),
+                           "model": body.get("model", ""), "base_url": body.get("base_url", ""),
+                           "temperature": body.get("temperature")}
     if body.get("api_key"):
-        cfg["api_key"] = secrets_mod.enc(body["api_key"])  # encrypted at rest
-    if body.get("clear_api_key"):
-        cfg.pop("api_key", None)
-    store.set_setting("llm", cfg)
+        cfg["api_key"] = body["api_key"]
+    res = llms_mod.upsert(cfg)
+    llms_mod.set_default(res["id"])
     return {"ok": True}
 
 
@@ -197,34 +262,15 @@ async def put_llm_settings(req: Request) -> dict[str, Any]:
 async def list_provider_models(req: Request) -> dict[str, Any]:
     from . import providers
     b = await req.json() if await req.body() else {}
-    cfg = store.get_setting("llm") or {}
-    key = b.get("api_key") or secrets_mod.dec(cfg.get("api_key"))
     try:
-        return {"models": providers.fetch_models(b.get("provider", "openai"), b.get("base_url", ""), key)}
+        return {"models": providers.fetch_models(b.get("provider", "openai"), b.get("base_url", ""), _key_for(b))}
     except Exception as e:  # noqa: BLE001
         return {"models": [], "error": f"{type(e).__name__}: {e}"[:200]}
 
 
 @app.post("/api/settings/llm/test")
-async def test_llm(req: Request) -> dict[str, Any]:
-    body = await req.json() if await req.body() else {}
-    cfg = store.get_setting("llm") or {}
-    model = body.get("model") or cfg.get("model")
-    if not model:
-        raise HTTPException(400, "set a model first")
-    kwargs: dict[str, Any] = {"model": model}
-    api_key = body.get("api_key") or secrets_mod.dec(cfg.get("api_key"))
-    base_url = body.get("base_url") or cfg.get("base_url")
-    if api_key:
-        kwargs["api_key"] = api_key
-    if base_url:
-        kwargs["base_url"] = base_url
-    try:
-        from crewai import LLM
-        out = LLM(**kwargs).call("Reply with exactly the word: ok")
-        return {"ok": True, "sample": str(out)[:120]}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
+async def test_llm_compat(req: Request) -> dict[str, Any]:
+    return await test_llm(req)
 
 
 # ---- workspaces (CRUD) -----------------------------------------------------
