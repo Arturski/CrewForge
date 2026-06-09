@@ -193,6 +193,18 @@ async def put_llm_settings(req: Request) -> dict[str, Any]:
     return {"ok": True}
 
 
+@app.post("/api/settings/llm/models")
+async def list_provider_models(req: Request) -> dict[str, Any]:
+    from . import providers
+    b = await req.json() if await req.body() else {}
+    cfg = store.get_setting("llm") or {}
+    key = b.get("api_key") or secrets_mod.dec(cfg.get("api_key"))
+    try:
+        return {"models": providers.fetch_models(b.get("provider", "openai"), b.get("base_url", ""), key)}
+    except Exception as e:  # noqa: BLE001
+        return {"models": [], "error": f"{type(e).__name__}: {e}"[:200]}
+
+
 @app.post("/api/settings/llm/test")
 async def test_llm(req: Request) -> dict[str, Any]:
     body = await req.json() if await req.body() else {}

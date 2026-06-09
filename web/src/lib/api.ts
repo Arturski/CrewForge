@@ -144,6 +144,8 @@ export const api = {
     req<{ ok: boolean }>("/api/settings/llm", json("PUT", cfg)),
   testLlm: (cfg: Partial<{ model: string; base_url: string; api_key: string }>) =>
     req<{ ok: boolean; sample?: string; error?: string }>("/api/settings/llm/test", json("POST", cfg)),
+  providerModels: (cfg: { provider: string; base_url?: string; api_key?: string }) =>
+    req<{ models: string[]; error?: string }>("/api/settings/llm/models", json("POST", cfg)),
 
   knowledgeBases: () => req<{ knowledge_bases: KnowledgeBase[] }>("/api/knowledge"),
   createKnowledge: (name: string, description = "") => req<KnowledgeBase>("/api/knowledge", json("POST", { name, description })),

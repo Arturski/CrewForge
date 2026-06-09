@@ -1,61 +1,61 @@
 import { useEffect, useState } from "react";
 import { api, type LlmSettings } from "../lib/api";
-import { Badge, Button, Card, CardHeader, Input, LabeledField, Select } from "../components/ui";
+import { Badge, Button, Card, CardHeader, Input, LabeledField } from "../components/ui";
 import { useToast } from "../lib/toast";
 
-// Providers present FRIENDLY model names; the LiteLLM wire string (e.g.
-// "openai/MiniMax-M1") is what we store/send but is shown only as a small
-// transparency note — never as the primary label.
-type Model = { label: string; value: string };
+// Models are free-text (type any id) + a Refresh that pulls the provider's LIVE
+// model list — so nothing goes stale. The stored wire string is provider/model
+// (LiteLLM); we show a transparency note. Presets are just light suggestions.
 type Provider = {
-  id: string; label: string; models: Model[]; baseUrl: string;
-  custom?: boolean; needsKey: boolean; keyHelp: string;
+  id: string; label: string; prefix: string; baseUrl: string;
+  custom?: boolean; needsKey: boolean; keyHelp: string; suggestions: string[];
 };
 
 const PROVIDERS: Provider[] = [
-  { id: "openai", label: "OpenAI", baseUrl: "", needsKey: true, keyHelp: "platform.openai.com → API keys",
-    models: [{ label: "GPT-4o mini", value: "openai/gpt-4o-mini" }, { label: "GPT-4o", value: "openai/gpt-4o" }, { label: "o3-mini", value: "openai/o3-mini" }] },
-  { id: "anthropic", label: "Anthropic", baseUrl: "", needsKey: true, keyHelp: "console.anthropic.com → API keys",
-    models: [{ label: "Claude 3.5 Sonnet", value: "anthropic/claude-3-5-sonnet-latest" }, { label: "Claude 3.5 Haiku", value: "anthropic/claude-3-5-haiku-latest" }] },
-  { id: "minimax", label: "MiniMax", baseUrl: "https://api.minimax.io/v1", needsKey: true, keyHelp: "MiniMax platform → API key (OpenAI-compatible endpoint)",
-    models: [{ label: "MiniMax-M1", value: "hosted_vllm/MiniMax-M1" }, { label: "MiniMax-Text-01", value: "hosted_vllm/MiniMax-Text-01" }, { label: "abab6.5s-chat", value: "hosted_vllm/abab6.5s-chat" }] },
-  { id: "gemini", label: "Google Gemini", baseUrl: "", needsKey: true, keyHelp: "aistudio.google.com → API key",
-    models: [{ label: "Gemini 1.5 Pro", value: "gemini/gemini-1.5-pro" }, { label: "Gemini 1.5 Flash", value: "gemini/gemini-1.5-flash" }] },
-  { id: "groq", label: "Groq", baseUrl: "", needsKey: true, keyHelp: "console.groq.com → API keys",
-    models: [{ label: "Llama 3.3 70B", value: "groq/llama-3.3-70b-versatile" }] },
-  { id: "ollama", label: "Ollama (local)", baseUrl: "http://localhost:11434", needsKey: false, keyHelp: "No key needed — runs locally",
-    models: [{ label: "Llama 3.1", value: "ollama/llama3.1" }, { label: "Qwen 2.5", value: "ollama/qwen2.5" }] },
-  { id: "custom", label: "Custom (OpenAI-compatible)", baseUrl: "https://your-endpoint/v1", custom: true, needsKey: true,
-    keyHelp: "Any OpenAI-compatible endpoint (vLLM, LM Studio, a proxy…). Use the prefix hosted_vllm/<model>.",
-    models: [] },
+  { id: "openai", label: "OpenAI", prefix: "openai/", baseUrl: "", needsKey: true,
+    keyHelp: "platform.openai.com → API keys", suggestions: ["gpt-4o-mini", "gpt-4o", "o3", "o4-mini", "gpt-4.1"] },
+  { id: "anthropic", label: "Anthropic", prefix: "anthropic/", baseUrl: "", needsKey: true,
+    keyHelp: "console.anthropic.com → API keys", suggestions: ["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"] },
+  { id: "minimax", label: "MiniMax", prefix: "hosted_vllm/", baseUrl: "https://api.minimax.io/v1", needsKey: true,
+    keyHelp: "MiniMax platform → API key (OpenAI-compatible)", suggestions: ["MiniMax-M1", "MiniMax-Text-01", "abab6.5s-chat"] },
+  { id: "gemini", label: "Google Gemini", prefix: "gemini/", baseUrl: "", needsKey: true,
+    keyHelp: "aistudio.google.com → API key", suggestions: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"] },
+  { id: "groq", label: "Groq", prefix: "groq/", baseUrl: "", needsKey: true,
+    keyHelp: "console.groq.com → API keys", suggestions: ["llama-3.3-70b-versatile"] },
+  { id: "ollama", label: "Ollama (local)", prefix: "ollama/", baseUrl: "http://localhost:11434", needsKey: false,
+    keyHelp: "No key needed — runs locally", suggestions: ["llama3.1", "qwen2.5"] },
+  { id: "custom", label: "Custom (OpenAI-compatible)", prefix: "", baseUrl: "https://your-endpoint/v1", custom: true, needsKey: true,
+    keyHelp: "Any OpenAI-compatible endpoint. Use hosted_vllm/<model>.", suggestions: [] },
 ];
 
-function providerForModel(value: string): Provider {
-  return PROVIDERS.find((p) => p.models.some((m) => m.value === value))
-    ?? PROVIDERS.find((p) => !p.custom && value.startsWith(p.id))
-    ?? PROVIDERS.find((p) => p.custom)!;
-}
-function labelFor(p: Provider, value: string): string {
-  return p.models.find((m) => m.value === value)?.label ?? value;
+function providerForWire(wire: string): Provider {
+  // exact prefix match (longest first so hosted_vllm/ wins over '')
+  const byPrefix = [...PROVIDERS].filter((p) => p.prefix).sort((a, b) => b.prefix.length - a.prefix.length);
+  return byPrefix.find((p) => wire.startsWith(p.prefix)) ?? PROVIDERS.find((p) => p.custom)!;
 }
 
 export function Settings() {
   const toast = useToast();
   const [cfg, setCfg] = useState<LlmSettings | null>(null);
   const [provider, setProvider] = useState<Provider>(PROVIDERS[0]);
-  const [model, setModel] = useState(PROVIDERS[0].models[0].value); // wire string
+  const [model, setModel] = useState(PROVIDERS[0].suggestions[0]); // bare id (or full wire for custom)
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [temperature, setTemperature] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fetched, setFetched] = useState<string[] | null>(null);
   const [test, setTest] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const wire = provider.custom ? model : provider.prefix + model;
 
   useEffect(() => {
     api.getLlm().then((c) => {
       setCfg(c);
       if (c.model) {
-        const p = providerForModel(c.model);
-        setProvider(p); setModel(c.model); setBaseUrl(c.base_url || p.baseUrl);
+        const p = providerForWire(c.model);
+        setProvider(p);
+        setModel(p.custom ? c.model : c.model.slice(p.prefix.length));
+        setBaseUrl(c.base_url || p.baseUrl);
       }
       setTemperature(c.temperature == null ? "" : String(c.temperature));
     }).catch(() => {});
@@ -63,15 +63,27 @@ export function Settings() {
 
   function pickProvider(p: Provider) {
     setProvider(p);
-    setModel(p.custom ? "" : p.models[0].value);
+    setModel(p.custom ? "" : p.suggestions[0] ?? "");
     setBaseUrl(p.baseUrl);
+    setFetched(null);
     setTest(null);
+  }
+
+  async function refresh() {
+    setBusy(true);
+    try {
+      const d = await api.providerModels({ provider: provider.id, base_url: baseUrl, ...(apiKey ? { api_key: apiKey } : {}) });
+      if (d.error) toast(`Couldn't load models: ${d.error}`, "error");
+      setFetched(d.models);
+      if (d.models.length) toast(`Loaded ${d.models.length} live models`, "ok");
+    } catch (e) { toast(String(e), "error"); }
+    finally { setBusy(false); }
   }
 
   async function runTest() {
     setBusy(true); setTest(null);
     try {
-      const r = await api.testLlm({ model, base_url: baseUrl, ...(apiKey ? { api_key: apiKey } : {}) });
+      const r = await api.testLlm({ model: wire, base_url: baseUrl, ...(apiKey ? { api_key: apiKey } : {}) });
       setTest(r.ok ? { ok: true, msg: `Connected — model replied: "${r.sample}"` } : { ok: false, msg: r.error ?? "failed" });
     } catch (e) { setTest({ ok: false, msg: String(e) }); }
     finally { setBusy(false); }
@@ -80,21 +92,22 @@ export function Settings() {
   async function save() {
     setBusy(true);
     try {
-      await api.saveLlm({ model, base_url: baseUrl, temperature: temperature === "" ? undefined : Number(temperature), ...(apiKey ? { api_key: apiKey } : {}) });
+      await api.saveLlm({ model: wire, base_url: baseUrl, temperature: temperature === "" ? undefined : Number(temperature), ...(apiKey ? { api_key: apiKey } : {}) });
       setApiKey("");
       setCfg(await api.getLlm());
-      toast(`Saved — ${provider.label} · ${labelFor(provider, model)}`, "ok");
+      toast(`Saved — ${provider.label} · ${model}`, "ok");
     } catch (e) { toast(String(e), "error"); }
     finally { setBusy(false); }
   }
 
   const showBaseUrl = provider.custom || provider.id === "minimax" || provider.id === "ollama" || !!baseUrl;
+  const options = fetched ?? provider.suggestions;
 
   return (
     <div className="max-w-2xl space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-ink">Models</h1>
-        <p className="text-sm text-muted">The LLM that powers your agents. Dry-run works with no key; live runs use this. Pick a provider → choose a model → add your key.</p>
+        <p className="text-sm text-muted">The LLM that powers your agents. Dry-run works with no key; live runs use this. Pick a provider → choose/refresh a model → add your key.</p>
       </div>
 
       <Card>
@@ -113,24 +126,24 @@ export function Settings() {
         <CardHeader title="2 · Model & key"
           right={cfg?.configured ? <Badge tone="ok">configured</Badge> : <Badge tone="warn">dry-run only</Badge>} />
         <div className="space-y-4 p-5">
-          <LabeledField label="Model" tip="The model that runs your agents. Pick one for this provider.">
-            {provider.custom ? (
-              <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="hosted_vllm/your-model" />
-            ) : (
-              <Select value={model} onChange={(e) => setModel(e.target.value)}>
-                {provider.models.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </Select>
-            )}
+          <LabeledField label="Model" tip="Type any model id, or click Refresh to load your provider's current models. Don't trust the suggestions to be up to date.">
+            <div className="flex gap-2">
+              <Input list="model-options" value={model} onChange={(e) => setModel(e.target.value)}
+                placeholder={provider.custom ? "hosted_vllm/your-model" : (provider.suggestions[0] || "model id")} />
+              <Button variant="ghost" onClick={refresh} disabled={busy}>↻ Refresh</Button>
+            </div>
+            <datalist id="model-options">{options.map((m) => <option key={m} value={m} />)}</datalist>
             {model && (
               <p className="mt-1 text-[11px] text-muted">
-                Sent to the API as <code className="rounded bg-elevated2 px-1 py-0.5 text-ink">{model}</code>
+                Sent to the API as <code className="rounded bg-elevated2 px-1 py-0.5 text-ink">{wire}</code>
                 {showBaseUrl && baseUrl ? <> · base <code className="rounded bg-elevated2 px-1 py-0.5 text-ink">{baseUrl}</code></> : null}
+                {fetched ? <> · <span className="text-ok">{fetched.length} live models loaded</span></> : null}
               </p>
             )}
           </LabeledField>
 
           {showBaseUrl && (
-            <LabeledField label="Base URL" tip="The provider endpoint. Pre-filled for this provider; change it for a proxy or self-host.">
+            <LabeledField label="Base URL" tip="The provider endpoint. Pre-filled; change it for a proxy or self-host.">
               <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={provider.baseUrl} />
             </LabeledField>
           )}
@@ -155,7 +168,7 @@ export function Settings() {
               {test.msg}
             </div>
           )}
-          <p className="text-xs text-muted">{provider.keyHelp}</p>
+          <p className="text-xs text-muted">{provider.keyHelp} · Tip: click <span className="text-ink">Refresh</span> to load the provider's current models.</p>
         </div>
       </Card>
     </div>
