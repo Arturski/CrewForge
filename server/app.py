@@ -144,7 +144,7 @@ def registry_search(q: str = "") -> dict[str, Any]:
 # ---- MCP servers (external/local skills) -----------------------------------
 @app.get("/api/mcp")
 def list_mcp() -> dict[str, Any]:
-    return {"servers": mcp.list_servers()}
+    return {"servers": [mcp.public(s) for s in mcp.list_servers()]}
 
 
 @app.post("/api/mcp")
@@ -154,7 +154,7 @@ async def add_mcp(req: Request) -> dict[str, Any]:
         raise HTTPException(400, "stdio servers need a command")
     if body.get("transport") in ("sse", "streamable-http") and not body.get("url"):
         raise HTTPException(400, "remote servers need a url")
-    return mcp.add_server(body)
+    return mcp.public(mcp.add_server(body))
 
 
 @app.post("/api/mcp/{server_id}/rescan")
@@ -162,7 +162,7 @@ def rescan_mcp(server_id: str) -> dict[str, Any]:
     s = mcp.rescan(server_id)
     if not s:
         raise HTTPException(404, "server not found")
-    return s
+    return mcp.public(s)
 
 
 @app.delete("/api/mcp/{server_id}")

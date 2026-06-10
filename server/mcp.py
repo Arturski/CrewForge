@@ -30,6 +30,13 @@ def list_servers() -> list[dict[str, Any]]:
     return servers
 
 
+def public(entry: dict[str, Any]) -> dict[str, Any]:
+    """API-safe view of a server config: env values never leave the backend."""
+    if not entry.get("env"):
+        return entry
+    return {**entry, "env": {k: "••••" for k in entry["env"]}}
+
+
 def _save(servers: list[dict[str, Any]]) -> None:
     store.set_setting(_KEY, servers)
 
@@ -39,10 +46,13 @@ def _server_params(cfg: dict[str, Any]):
     transport = cfg.get("transport", "stdio")
     if transport == "stdio":
         from mcp import StdioServerParameters
+
+        from . import secrets
+        env = {k: secrets.dec(v) for k, v in (cfg.get("env") or {}).items()}
         return StdioServerParameters(
             command=cfg["command"],
             args=cfg.get("args", []),
-            env={**os.environ, **(cfg.get("env") or {})},
+            env={**os.environ, **env},
         )
     # remote: sse | streamable-http
     return {"url": cfg["url"], "transport": transport}
@@ -76,7 +86,9 @@ def add_server(cfg: dict[str, Any]) -> dict[str, Any]:
     if transport == "stdio":
         entry["command"] = cfg.get("command", "")
         entry["args"] = cfg.get("args", [])
-        entry["env"] = cfg.get("env", {})
+        # env values are typically API keys — encrypt at rest like LLM keys
+        from . import secrets
+        entry["env"] = {k: secrets.enc(v) for k, v in (cfg.get("env") or {}).items()}
     else:
         entry["url"] = cfg.get("url", "")
 

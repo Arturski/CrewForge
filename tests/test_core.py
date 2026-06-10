@@ -167,3 +167,23 @@ def test_exporter_context_and_manager():
     assert tasks_cfg["write"]["context"] == ["research"]
     assert 'agents.pop("boss")' in files["crew.py"]
     assert "manager_agent=manager" in files["crew.py"]
+
+
+def test_mcp_env_encrypted_at_rest_and_masked():
+    store.init()
+    from server import mcp, secrets
+
+    # persist directly through the save path used by add_server (no live connect)
+    entry = {"id": "mcp-test", "name": "t", "transport": "stdio", "command": "echo",
+             "args": [], "env": {"API_KEY": secrets.enc("super-secret")},
+             "status": "error", "tools": [], "risk": "high"}
+    mcp._save([entry])
+    try:
+        stored = store.get_setting("mcp_servers")[0]
+        assert stored["env"]["API_KEY"].startswith("enc::")          # encrypted at rest
+        assert secrets.dec(stored["env"]["API_KEY"]) == "super-secret"  # recoverable
+        assert mcp.public(stored)["env"]["API_KEY"] == "••••"          # masked for the API
+        params = mcp._server_params(stored)
+        assert params.env["API_KEY"] == "super-secret"                 # decrypted for launch
+    finally:
+        mcp._save([])
