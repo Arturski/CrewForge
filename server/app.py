@@ -377,6 +377,26 @@ def get_run(run_id: str) -> dict[str, Any]:
     return runs._public(rec)
 
 
+@app.post("/api/runs/{run_id}/cancel")
+def cancel_run(run_id: str) -> dict[str, Any]:
+    if not runs.get(run_id):
+        raise HTTPException(404, "run not found")
+    return {"ok": runs.cancel(run_id)}
+
+
+@app.post("/api/runs/{run_id}/input")
+async def run_input(run_id: str, req: Request) -> dict[str, Any]:
+    """Deliver a HITL decision: {decision: approve|reject, edit?, feedback?}."""
+    if not runs.get(run_id):
+        raise HTTPException(404, "run not found")
+    b = await req.json() if await req.body() else {}
+    if b.get("decision") not in ("approve", "reject"):
+        raise HTTPException(400, "decision must be approve or reject")
+    if not runs.hitl_decision(run_id, b):
+        raise HTTPException(409, "run is not waiting for input")
+    return {"ok": True}
+
+
 @app.get("/api/runs/{run_id}/events")
 def run_events(run_id: str, since: int = 0) -> dict[str, Any]:
     if not runs.get(run_id):
@@ -401,7 +421,7 @@ async def run_events_stream(run_id: str, request: Request) -> StreamingResponse:
                 last = evt["seq"] + 1
                 yield f"id: {last}\ndata: {json.dumps(evt)}\n\n"
             rec = runs.get(run_id)
-            terminal = rec and rec.get("status") in ("succeeded", "failed")
+            terminal = rec and rec.get("status") in ("succeeded", "failed", "cancelled")
             if terminal and not runs.events_since(run_id, last):
                 yield f"event: end\ndata: {json.dumps({'status': rec['status']})}\n\n"
                 break

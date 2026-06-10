@@ -52,10 +52,11 @@ export interface RunEvent {
 }
 
 export interface RunRecord {
-  id: string; status: "running" | "succeeded" | "failed";
+  id: string; status: "running" | "succeeded" | "failed" | "cancelled";
   dry_run: boolean; spec_name: string; started_at: string; finished_at: string | null;
   result: string | null; error: string | null; event_count: number; tokens?: number;
   workspace_id?: string;
+  hitl?: { output: string; since: string } | null; // set while blocked at a human gate
 }
 
 export interface LlmSettings {
@@ -181,4 +182,7 @@ export const api = {
     req<{ run_id: string }>("/api/runs", json("POST", { workspace_id, dry_run, inputs })),
   runs: () => req<{ runs: RunRecord[] }>("/api/runs"),
   run: (id: string) => req<RunRecord>(`/api/runs/${id}`),
+  cancelRun: (id: string) => req<{ ok: boolean }>(`/api/runs/${id}/cancel`, { method: "POST" }),
+  hitlDecision: (id: string, body: { decision: "approve" | "reject"; edit?: string; feedback?: string }) =>
+    req<{ ok: boolean }>(`/api/runs/${id}/input`, json("POST", body)),
 };

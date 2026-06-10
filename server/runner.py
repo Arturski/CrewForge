@@ -57,6 +57,26 @@ def _extract_tokens(ev: Any) -> int:
     return 0
 
 
+class RunCancelled(Exception):
+    """Raised inside a run to abort it at the next LLM call or HITL gate."""
+
+
+def _wrap_cancel(llm: Any, cancel: threading.Event) -> Any:
+    """Shadow llm.call with a cancel check. Every agent step goes through
+    .call, so a cancelled run aborts at the next step boundary — without
+    changing the llm's class (the adapter's isinstance(FakeLLM) gate and
+    crewai's BaseLLM contract both still hold)."""
+    orig = llm.call
+
+    def call(*args: Any, **kwargs: Any):
+        if cancel.is_set():
+            raise RunCancelled("run cancelled by user")
+        return orig(*args, **kwargs)
+
+    object.__setattr__(llm, "call", call)
+    return llm
+
+
 class RunManager:
     def __init__(self) -> None:
         self.runs: dict[str, dict[str, Any]] = {}
@@ -83,7 +103,11 @@ class RunManager:
             "error": None,
             "tokens": 0,
             "inputs": inputs or {},
+            "hitl": None,
             "_lock": threading.Lock(),
+            "_cancel": threading.Event(),
+            "_hitl_evt": threading.Event(),
+            "_hitl_decision": None,
         }
         self.runs[run_id] = rec
         store.create_run(self._public(rec))
@@ -104,13 +128,31 @@ class RunManager:
             store.append_event(run_id, evt)
 
         def hitl_gate(output):
-            emit("hitl.gate.reached", chars=len(getattr(output, "raw", str(output))))
-            emit("hitl.decision.received", decision="auto-approve (dry-run)")
-            return (True, output)
+            """Block the worker until the user approves/edits/rejects in the Run
+            console (POST /api/runs/{id}/input). This is the long-poll the spike
+            marked as the production extension point."""
+            text = str(getattr(output, "raw", output))
+            with rec["_lock"]:
+                rec["_hitl_evt"].clear()
+                rec["_hitl_decision"] = None
+                rec["hitl"] = {"output": text[:8000], "since": _now()}
+            emit("hitl.gate.reached", chars=len(text))
+            while not rec["_hitl_evt"].wait(timeout=0.5):
+                if rec["_cancel"].is_set():
+                    rec["hitl"] = None
+                    raise RunCancelled("run cancelled at HITL gate")
+            d = rec["_hitl_decision"] or {"decision": "approve"}
+            rec["hitl"] = None
+            emit("hitl.decision.received", decision=d.get("decision", "approve"))
+            if d.get("decision") == "reject":
+                return (False, d.get("feedback") or "Please revise this output.")
+            edited = (d.get("edit") or "").strip()
+            return (True, edited) if edited and edited != text else (True, output)
 
         adapters: list = []
         try:
             llm, effective_dry = self._build_llm(dry_run, spec.get("llm_id"))
+            _wrap_cancel(llm, rec["_cancel"])
             rec["dry_run"] = effective_dry
 
             # Live runs: connect MCP servers and attach their tools to agents.
@@ -144,7 +186,7 @@ class RunManager:
                     if a.get("llm_id"):
                         built = llms.build(a["llm_id"])
                         if built is not None:
-                            agent_llms[a["id"]] = built
+                            agent_llms[a["id"]] = _wrap_cancel(built, rec["_cancel"])
 
             # Knowledge-base tools (keyless local embeddings → attach in any mode).
             wf_kbs = list(spec.get("knowledge") or [])
@@ -233,13 +275,23 @@ class RunManager:
                      mode="dry-run" if effective_dry else "live")
                 result = crew.kickoff(inputs=inputs) if inputs else crew.kickoff()
                 rec["result"] = str(getattr(result, "raw", result))[:4000]
+            if rec["_cancel"].is_set():  # crewai may swallow the abort and "finish"
+                raise RunCancelled("run cancelled by user")
             rec["status"] = "succeeded"
             emit("run.finished", status="succeeded", tokens=rec["tokens"] or None)
+        except RunCancelled:
+            rec["status"] = "cancelled"
+            emit("run.cancelled")
         except Exception as e:  # noqa: BLE001
-            rec["error"] = f"{type(e).__name__}: {e}"
-            rec["status"] = "failed"
-            emit("run.failed", error=rec["error"][:300])
+            if rec["_cancel"].is_set():  # crewai wraps our abort in its own error
+                rec["status"] = "cancelled"
+                emit("run.cancelled")
+            else:
+                rec["error"] = f"{type(e).__name__}: {e}"
+                rec["status"] = "failed"
+                emit("run.failed", error=rec["error"][:300])
         finally:
+            rec["hitl"] = None
             for ad in adapters:
                 try:
                     ad.stop()
@@ -247,6 +299,24 @@ class RunManager:
                     pass
             rec["finished_at"] = _now()
             store.update_run(self._public(rec))
+
+    # -- control ------------------------------------------------------------
+    def cancel(self, run_id: str) -> bool:
+        """Request cancellation. Takes effect at the next LLM call or HITL gate."""
+        rec = self.runs.get(run_id)
+        if not rec or rec["status"] != "running":
+            return False
+        rec["_cancel"].set()
+        return True
+
+    def hitl_decision(self, run_id: str, decision: dict[str, Any]) -> bool:
+        """Deliver the user's approve/edit/reject to a run blocked at a HITL gate."""
+        rec = self.runs.get(run_id)
+        if not rec or not rec.get("hitl"):
+            return False
+        rec["_hitl_decision"] = decision
+        rec["_hitl_evt"].set()
+        return True
 
     # -- reads --------------------------------------------------------------
     def get(self, run_id: str) -> dict[str, Any] | None:
@@ -263,7 +333,7 @@ class RunManager:
         return store.get_events(run_id, since)  # historical
 
     def _public(self, rec: dict[str, Any]) -> dict[str, Any]:
-        return {k: v for k, v in rec.items() if k not in ("events", "_lock")} | {
+        return {k: v for k, v in rec.items() if k != "events" and not k.startswith("_")} | {
             "event_count": len(rec["events"]) if "events" in rec else rec.get("event_count", 0)
         }
 
