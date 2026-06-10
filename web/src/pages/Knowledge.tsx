@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api, type KnowledgeBase, type SearchHit } from "../lib/api";
 import { Badge, Button, Card, CardHeader, Input, Modal, Tabs, TabsList, TabsTrigger, TabsContent, Textarea } from "../components/ui";
 import { useToast } from "../lib/toast";
-import { Database, Plus, Trash2, Upload } from "lucide-react";
+import { Database, GitBranch, Globe, Plus, Trash2, Upload } from "lucide-react";
 
 const SRC_TONE = { ready: "ok", processing: "running", error: "danger" } as const;
 
@@ -46,7 +46,7 @@ export function Knowledge() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-ink">Knowledge</h1>
-          <p className="max-w-2xl text-sm text-muted">Ingest your docs (files, text — soon web & GitHub). Agents search them at run time. Embeddings run locally — no API key needed.</p>
+          <p className="max-w-2xl text-sm text-muted">Ingest files, text, web pages, docs sites and GitHub repos. Agents search them at run time. Embeddings run locally — no API key needed.</p>
         </div>
         <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New knowledge base</Button>
       </div>
@@ -91,6 +91,9 @@ export function Knowledge() {
 function KbDetail({ kb, onChanged }: { kb: KnowledgeBase; onChanged: () => void }) {
   const toast = useToast();
   const [text, setText] = useState("");
+  const [url, setUrl] = useState("");
+  const [crawl, setCrawl] = useState(false);
+  const [repo, setRepo] = useState("");
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
@@ -101,6 +104,22 @@ function KbDetail({ kb, onChanged }: { kb: KnowledgeBase; onChanged: () => void 
     setBusy(true);
     try { await api.addKbSource(kb.id, { kind: "text", text }); setText(""); onChanged(); toast("Ingesting…", "ok"); }
     catch (e) { toast(String(e), "error"); } finally { setBusy(false); }
+  }
+  async function addUrl() {
+    if (!url.trim()) return;
+    setBusy(true);
+    try {
+      await api.addKbSource(kb.id, { kind: "url", url: url.trim(), crawl });
+      setUrl(""); onChanged(); toast(crawl ? "Crawling site…" : "Fetching page…", "ok");
+    } catch (e) { toast(String(e), "error"); } finally { setBusy(false); }
+  }
+  async function addRepo() {
+    if (!repo.trim()) return;
+    setBusy(true);
+    try {
+      await api.addKbSource(kb.id, { kind: "github", url: repo.trim() });
+      setRepo(""); onChanged(); toast("Ingesting repo…", "ok");
+    } catch (e) { toast(String(e), "error"); } finally { setBusy(false); }
   }
   async function addFile(file: File) {
     setBusy(true);
@@ -120,8 +139,12 @@ function KbDetail({ kb, onChanged }: { kb: KnowledgeBase; onChanged: () => void 
     <Card>
       <CardHeader title={kb.name} sub={`${kb.stats.sources} sources · ${kb.stats.chunks} chunks · local embeddings`} />
       <div className="space-y-5 p-5">
-        <Tabs value="add">
-          <TabsList><TabsTrigger value="add">Add data</TabsTrigger></TabsList>
+        <Tabs defaultValue="add">
+          <TabsList>
+            <TabsTrigger value="add">Text & files</TabsTrigger>
+            <TabsTrigger value="web">Web page</TabsTrigger>
+            <TabsTrigger value="github">GitHub repo</TabsTrigger>
+          </TabsList>
           <TabsContent value="add">
             <div className="space-y-3">
               <Textarea placeholder="Paste text/notes to ingest…" value={text} onChange={(e) => setText(e.target.value)} />
@@ -129,8 +152,29 @@ function KbDetail({ kb, onChanged }: { kb: KnowledgeBase; onChanged: () => void 
                 <Button onClick={addText} disabled={busy || !text.trim()}>Add text</Button>
                 <input ref={fileRef} type="file" className="hidden" onChange={(e) => e.target.files?.[0] && addFile(e.target.files[0])} />
                 <Button variant="ghost" onClick={() => fileRef.current?.click()} disabled={busy}><Upload className="h-4 w-4" /> Upload file</Button>
-                <span className="text-xs text-muted">pdf · docx · md · txt · csv · web/GitHub soon</span>
+                <span className="text-xs text-muted">pdf · docx · md · txt · csv</span>
               </div>
+            </div>
+          </TabsContent>
+          <TabsContent value="web">
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <Input placeholder="https://docs.example.com/intro" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addUrl()} />
+                <Button onClick={addUrl} disabled={busy || !url.trim()}><Globe className="h-4 w-4" /> Ingest</Button>
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
+                <input type="checkbox" checked={crawl} onChange={(e) => setCrawl(e.target.checked)} className="accent-[var(--brand)]" />
+                Crawl the whole site (follows same-site links, up to 30 pages)
+              </label>
+            </div>
+          </TabsContent>
+          <TabsContent value="github">
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <Input placeholder="https://github.com/owner/repo" value={repo} onChange={(e) => setRepo(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addRepo()} />
+                <Button onClick={addRepo} disabled={busy || !repo.trim()}><GitBranch className="h-4 w-4" /> Ingest</Button>
+              </div>
+              <p className="text-xs text-muted">Public repos only. Docs and source files are indexed (readme, md, code); lockfiles and binaries are skipped.</p>
             </div>
           </TabsContent>
         </Tabs>
@@ -142,7 +186,7 @@ function KbDetail({ kb, onChanged }: { kb: KnowledgeBase; onChanged: () => void 
             {(kb.sources ?? []).map((s) => (
               <div key={s.id} className="flex items-center gap-2 rounded-md border border-border bg-canvas px-3 py-1.5 text-xs">
                 <span className="truncate text-ink">{s.ref}</span>
-                <Badge tone={SRC_TONE[s.status]}>{s.status === "ready" ? `${s.chunks} chunks` : s.status}</Badge>
+                <Badge tone={SRC_TONE[s.status]}>{s.status === "ready" ? `${s.chunks} chunks` : s.status === "processing" ? (s.progress || "processing") : s.status}</Badge>
                 {s.error && <span className="truncate text-danger">{s.error}</span>}
               </div>
             ))}

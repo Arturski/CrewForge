@@ -1,7 +1,9 @@
-"""Knowledge base orchestration: CRUD + ingestion (text/file) + search.
+"""Knowledge base orchestration: CRUD + ingestion + search.
 
 Phase 1: file + pasted text -> vector index (keyless local embeddings).
-Web/GitHub crawl + Kuzu graph extraction come in later phases.
+Phase 2: web page / docs-site crawl + GitHub repo ingestion, with live
+progress on the source row (the UI polls while status == processing).
+Kuzu graph extraction comes in Phase 3.
 """
 from __future__ import annotations
 
@@ -66,31 +68,72 @@ def _extract(kind: str, *, text: str | None, filename: str | None, content: byte
 
 
 def add_source(kb_id: str, kind: str, *, ref: str = "", text: str | None = None,
-               filename: str | None = None, content: bytes | None = None) -> dict[str, Any]:
+               filename: str | None = None, content: bytes | None = None,
+               url: str | None = None, crawl: bool = False, max_pages: int = 30) -> dict[str, Any]:
     src = {"id": f"src-{uuid.uuid4().hex[:8]}", "kb_id": kb_id, "kind": kind,
-           "ref": ref or filename or (text[:40] + "…" if text else "text"),
-           "status": "processing", "chunks": 0, "error": None, "created": _now()}
+           "ref": ref or url or filename or (text[:40] + "…" if text else "text"),
+           "status": "processing", "chunks": 0, "error": None, "progress": None,
+           "created": _now()}
     store.save_source(src)
-    threading.Thread(target=_ingest, args=(kb_id, src, text, filename, content),
+    threading.Thread(target=_ingest,
+                     args=(kb_id, src, text, filename, content, url, crawl, max_pages),
                      daemon=True).start()
     return src
 
 
-def _ingest(kb_id: str, src: dict[str, Any], text, filename, content) -> None:
+def _collect_docs(src: dict[str, Any], text, filename, content, url, crawl, max_pages,
+                  progress) -> list[tuple[str, str]]:
+    """Resolve a source into [(doc_ref, text)] documents to index."""
+    kind = src["kind"]
+    if kind == "url":
+        from . import web
+        if crawl:
+            progress("crawling…")
+            return web.crawl(url, max_pages=max_pages,
+                             on_progress=lambda done, total: progress(f"{done}/{total} pages"))
+        title, page_text, _ = web.fetch_page(url)
+        if title:
+            src["ref"] = title[:80]
+        return [(url, page_text)]
+    if kind == "github":
+        from . import github
+        progress("downloading repo…")
+        return github.fetch_repo(url, on_progress=lambda done, total: progress(f"{done}/{total} files"))
+    return [(src["ref"], _extract(kind, text=text, filename=filename, content=content))]
+
+
+def _ingest(kb_id: str, src: dict[str, Any], text, filename, content,
+            url=None, crawl=False, max_pages=30) -> None:
+    def progress(msg: str) -> None:
+        src["progress"] = msg
+        store.save_source(src)
+
     try:
-        raw = _extract(src["kind"], text=text, filename=filename, content=content)
-        chunks = vector.chunk(raw)
-        if not chunks:
+        docs = _collect_docs(src, text, filename, content, url, crawl, max_pages, progress)
+        docs = [(ref, t) for ref, t in docs if t]
+        if not docs:
             raise ValueError("no text extracted")
-        embs = vector.embed(chunks)
-        rows = [(f"{src['id']}-{i}", ch, emb, {"source": src["ref"]})
-                for i, (ch, emb) in enumerate(zip(chunks, embs))]
-        store.add_chunks(kb_id, src["id"], rows)
+        total_chunks = 0
+        for d_i, (doc_ref, raw) in enumerate(docs):
+            chunks = vector.chunk(raw)
+            if not chunks:
+                continue
+            embs = vector.embed(chunks)
+            rows = [(f"{src['id']}-{d_i}-{i}", ch, emb, {"source": doc_ref})
+                    for i, (ch, emb) in enumerate(zip(chunks, embs))]
+            store.add_chunks(kb_id, src["id"], rows)
+            total_chunks += len(chunks)
+            if len(docs) > 1:
+                progress(f"indexed {d_i + 1}/{len(docs)} docs")
+        if not total_chunks:
+            raise ValueError("no text extracted")
         src["status"] = "ready"
-        src["chunks"] = len(chunks)
+        src["chunks"] = total_chunks
+        src["progress"] = None
     except Exception as e:  # noqa: BLE001
         src["status"] = "error"
         src["error"] = f"{type(e).__name__}: {e}"[:300]
+        src["progress"] = None
     store.save_source(src)
 
 

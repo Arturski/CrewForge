@@ -23,12 +23,14 @@ export interface WorkspaceSummary {
 export interface AgentSpec {
   id: string; role: string; goal: string; backstory: string;
   tools?: string[]; allow_delegation?: boolean;
+  llm_id?: string; // configured LLM connection; blank = workflow default
   // agents may carry any additional crewai field set via the advanced panel
   [key: string]: unknown;
 }
 export interface TaskSpec {
   agent: string; description: string; expected_output: string;
   human_input?: boolean; name?: string; rules?: string;
+  context?: number[]; // indices of earlier tasks whose output feeds this one
   [key: string]: unknown;
 }
 export interface Workspace {
@@ -40,6 +42,8 @@ export interface Workspace {
   planning?: boolean; // crew plans before executing
   memory?: boolean; // crew memory (live runs)
   knowledge?: string[]; // workflow-level knowledge base ids
+  llm_id?: string; // configured LLM connection for the whole crew; blank = default
+  manager_agent_id?: string; // hierarchical only: agent that manages the crew
 }
 
 export interface RunEvent {
@@ -50,14 +54,22 @@ export interface RunEvent {
 }
 
 export interface RunRecord {
-  id: string; status: "running" | "succeeded" | "failed";
+  id: string; status: "running" | "succeeded" | "failed" | "cancelled";
   dry_run: boolean; spec_name: string; started_at: string; finished_at: string | null;
   result: string | null; error: string | null; event_count: number; tokens?: number;
   workspace_id?: string;
+  inputs?: Record<string, string>; // run-time variables this run started with
+  hitl?: { output: string; since: string } | null; // set while blocked at a human gate
 }
 
 export interface LlmSettings {
   configured: boolean; model: string; base_url: string;
+  temperature: number | null; api_key_set: boolean;
+}
+
+// One named LLM connection (multiple may be configured; one is the default).
+export interface LlmConfig {
+  id: string; name: string; model: string; base_url: string;
   temperature: number | null; api_key_set: boolean;
 }
 
@@ -72,6 +84,7 @@ export interface TemplateSummary {
 export interface KnowledgeSource {
   id: string; kb_id: string; kind: string; ref: string;
   status: "processing" | "ready" | "error"; chunks: number; error?: string | null;
+  progress?: string | null; // live ingest status, e.g. "12/30 pages"
 }
 export interface KnowledgeBase {
   id: string; name: string; description: string; embedder: string; created: string;
@@ -130,6 +143,7 @@ export const api = {
   workspace: (id: string) => req<Workspace>(`/api/workspaces/${id}`),
   createWorkspace: (name: string, template?: string) =>
     req<Workspace>("/api/workspaces", json("POST", { name, ...(template ? { template } : {}) })),
+  duplicateWorkspace: (id: string) => req<Workspace>(`/api/workspaces/${id}/duplicate`, { method: "POST" }),
   personas: () => req<{ personas: Persona[] }>("/api/personas"),
   savePersona: (p: Partial<Persona>) => req<Persona>("/api/personas", json("POST", p)),
   deletePersona: (id: string) => req<{ ok: boolean }>(`/api/personas/${id}`, { method: "DELETE" }),
@@ -142,16 +156,23 @@ export const api = {
   getLlm: () => req<LlmSettings>("/api/settings/llm"),
   saveLlm: (cfg: Partial<{ model: string; base_url: string; temperature: number; api_key: string; clear_api_key: boolean }>) =>
     req<{ ok: boolean }>("/api/settings/llm", json("PUT", cfg)),
-  testLlm: (cfg: Partial<{ model: string; base_url: string; api_key: string }>) =>
-    req<{ ok: boolean; sample?: string; error?: string }>("/api/settings/llm/test", json("POST", cfg)),
-  providerModels: (cfg: { provider: string; base_url?: string; api_key?: string }) =>
-    req<{ models: string[]; error?: string }>("/api/settings/llm/models", json("POST", cfg)),
+
+  // Multiple named LLM connections (selectable per workflow / per agent).
+  llms: () => req<{ llms: LlmConfig[]; default: string | null }>("/api/llms"),
+  saveLlm2: (cfg: Partial<{ id: string; name: string; model: string; base_url: string; temperature: number; api_key: string }>) =>
+    req<{ id: string; name: string }>("/api/llms", json("POST", cfg)),
+  deleteLlm: (id: string) => req<{ ok: boolean }>(`/api/llms/${id}`, { method: "DELETE" }),
+  setDefaultLlm: (id: string) => req<{ ok: boolean }>("/api/llms/default", json("PUT", { id })),
+  testLlm: (cfg: Partial<{ id: string; model: string; base_url: string; api_key: string }>) =>
+    req<{ ok: boolean; sample?: string; error?: string }>("/api/llms/test", json("POST", cfg)),
+  providerModels: (cfg: { provider: string; base_url?: string; api_key?: string; id?: string }) =>
+    req<{ models: string[]; error?: string }>("/api/llms/models", json("POST", cfg)),
 
   knowledgeBases: () => req<{ knowledge_bases: KnowledgeBase[] }>("/api/knowledge"),
   createKnowledge: (name: string, description = "") => req<KnowledgeBase>("/api/knowledge", json("POST", { name, description })),
   knowledgeBase: (id: string) => req<KnowledgeBase>(`/api/knowledge/${id}`),
   deleteKnowledge: (id: string) => req<{ ok: boolean }>(`/api/knowledge/${id}`, { method: "DELETE" }),
-  addKbSource: (id: string, body: { kind: string; text?: string; filename?: string; content_b64?: string }) =>
+  addKbSource: (id: string, body: { kind: string; text?: string; filename?: string; content_b64?: string; url?: string; crawl?: boolean; max_pages?: number }) =>
     req<KnowledgeSource>(`/api/knowledge/${id}/sources`, json("POST", body)),
   searchKb: (id: string, q: string) => req<{ results: SearchHit[] }>(`/api/knowledge/${id}/search`, json("POST", { q })),
 
@@ -165,4 +186,7 @@ export const api = {
     req<{ run_id: string }>("/api/runs", json("POST", { workspace_id, dry_run, inputs })),
   runs: () => req<{ runs: RunRecord[] }>("/api/runs"),
   run: (id: string) => req<RunRecord>(`/api/runs/${id}`),
+  cancelRun: (id: string) => req<{ ok: boolean }>(`/api/runs/${id}/cancel`, { method: "POST" }),
+  hitlDecision: (id: string, body: { decision: "approve" | "reject"; edit?: string; feedback?: string }) =>
+    req<{ ok: boolean }>(`/api/runs/${id}/input`, json("POST", body)),
 };

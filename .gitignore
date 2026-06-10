@@ -32,3 +32,8 @@ spikes/**/manifest.json
 .DS_Store
 .idea/
 .vscode/
+.claude/
+.playwright-mcp/
+
+# graphify (generated knowledge graph)
+graphify-out/

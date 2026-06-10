@@ -116,9 +116,16 @@ async def add_kb_source(kb_id: str, req: Request) -> dict[str, Any]:
     if not store.get_kb(kb_id):
         raise HTTPException(404, "knowledge base not found")
     b = await req.json()
-    if b.get("kind") == "file":
+    kind = b.get("kind")
+    if kind == "file":
         content = base64.b64decode((b.get("content_b64") or "").split(",")[-1] or "")
         return knowledge_mod.add_source(kb_id, "file", filename=b.get("filename"), content=content)
+    if kind in ("url", "github"):
+        url = (b.get("url") or "").strip()
+        if not url:
+            raise HTTPException(400, "url is required")
+        return knowledge_mod.add_source(kb_id, kind, url=url, crawl=bool(b.get("crawl")),
+                                        max_pages=min(int(b.get("max_pages") or 30), 100))
     return knowledge_mod.add_source(kb_id, "text", text=b.get("text", ""))
 
 
@@ -137,7 +144,7 @@ def registry_search(q: str = "") -> dict[str, Any]:
 # ---- MCP servers (external/local skills) -----------------------------------
 @app.get("/api/mcp")
 def list_mcp() -> dict[str, Any]:
-    return {"servers": mcp.list_servers()}
+    return {"servers": [mcp.public(s) for s in mcp.list_servers()]}
 
 
 @app.post("/api/mcp")
@@ -147,7 +154,7 @@ async def add_mcp(req: Request) -> dict[str, Any]:
         raise HTTPException(400, "stdio servers need a command")
     if body.get("transport") in ("sse", "streamable-http") and not body.get("url"):
         raise HTTPException(400, "remote servers need a url")
-    return mcp.add_server(body)
+    return mcp.public(mcp.add_server(body))
 
 
 @app.post("/api/mcp/{server_id}/rescan")
@@ -155,7 +162,7 @@ def rescan_mcp(server_id: str) -> dict[str, Any]:
     s = mcp.rescan(server_id)
     if not s:
         raise HTTPException(404, "server not found")
-    return s
+    return mcp.public(s)
 
 
 @app.delete("/api/mcp/{server_id}")
@@ -301,6 +308,17 @@ async def create_workspace(req: Request) -> dict[str, Any]:
     return store.save_workspace(ws)
 
 
+@app.post("/api/workspaces/{ws_id}/duplicate")
+def duplicate_workspace(ws_id: str) -> dict[str, Any]:
+    ws = store.get_workspace(ws_id)
+    if not ws:
+        raise HTTPException(404, "workspace not found")
+    dup = copy.deepcopy(ws)
+    dup["id"] = f"ws-{uuid.uuid4().hex[:8]}"
+    dup["name"] = f"{ws.get('name', 'Crew')} (copy)"
+    return store.save_workspace(dup)
+
+
 @app.get("/api/workspaces/{workspace_id}")
 def get_workspace(workspace_id: str) -> dict[str, Any]:
     ws = store.get_workspace(workspace_id)
@@ -370,6 +388,26 @@ def get_run(run_id: str) -> dict[str, Any]:
     return runs._public(rec)
 
 
+@app.post("/api/runs/{run_id}/cancel")
+def cancel_run(run_id: str) -> dict[str, Any]:
+    if not runs.get(run_id):
+        raise HTTPException(404, "run not found")
+    return {"ok": runs.cancel(run_id)}
+
+
+@app.post("/api/runs/{run_id}/input")
+async def run_input(run_id: str, req: Request) -> dict[str, Any]:
+    """Deliver a HITL decision: {decision: approve|reject, edit?, feedback?}."""
+    if not runs.get(run_id):
+        raise HTTPException(404, "run not found")
+    b = await req.json() if await req.body() else {}
+    if b.get("decision") not in ("approve", "reject"):
+        raise HTTPException(400, "decision must be approve or reject")
+    if not runs.hitl_decision(run_id, b):
+        raise HTTPException(409, "run is not waiting for input")
+    return {"ok": True}
+
+
 @app.get("/api/runs/{run_id}/events")
 def run_events(run_id: str, since: int = 0) -> dict[str, Any]:
     if not runs.get(run_id):
@@ -394,7 +432,7 @@ async def run_events_stream(run_id: str, request: Request) -> StreamingResponse:
                 last = evt["seq"] + 1
                 yield f"id: {last}\ndata: {json.dumps(evt)}\n\n"
             rec = runs.get(run_id)
-            terminal = rec and rec.get("status") in ("succeeded", "failed")
+            terminal = rec and rec.get("status") in ("succeeded", "failed", "cancelled")
             if terminal and not runs.events_since(run_id, last):
                 yield f"event: end\ndata: {json.dumps({'status': rec['status']})}\n\n"
                 break

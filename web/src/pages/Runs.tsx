@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, type RunEvent, type RunRecord, type Workspace } from "../lib/api";
-import { Badge, Button, Card, CardHeader } from "../components/ui";
+import { Badge, Button, Card, CardHeader, Textarea } from "../components/ui";
 import { EventTimeline } from "../components/EventTimeline";
 import { CrewCanvas, type NodeStatus } from "../components/CrewCanvas";
+import { useToast } from "../lib/toast";
 
-const STATUS_TONE = { running: "running", succeeded: "ok", failed: "danger" } as const;
+const STATUS_TONE = { running: "running", succeeded: "ok", failed: "danger", cancelled: "warn" } as const;
 
 export function Runs() {
+  const toast = useToast();
   const [params, setParams] = useSearchParams();
   const runId = params.get("run");
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -32,6 +34,8 @@ export function Runs() {
     es.onmessage = (e) => {
       const evt = JSON.parse(e.data) as RunEvent;
       setEvents((prev) => (prev.some((p) => p.seq === evt.seq) ? prev : [...prev, evt]));
+      // A gate opened or closed — refresh the record so the HITL panel follows.
+      if (evt.kind.startsWith("hitl.")) api.run(runId).then(setRecord).catch(() => {});
     };
     es.addEventListener("end", () => {
       es.close();
@@ -101,10 +105,28 @@ export function Runs() {
                   <Badge tone={STATUS_TONE[record.status]}>
                     {record.status}{record.dry_run ? " · dry-run" : ""}
                   </Badge>
+                  {record.status === "running" && (
+                    <Button variant="ghost" onClick={async () => {
+                      try { await api.cancelRun(record.id); toast("Stopping run…", "ok"); }
+                      catch (e) { toast(String(e), "error"); }
+                    }}>■ Stop</Button>
+                  )}
+                  {record.status !== "running" && record.workspace_id && (
+                    <Button variant="ghost" onClick={async () => {
+                      try {
+                        const { run_id } = await api.startRun(record.workspace_id!, record.dry_run, record.inputs ?? {});
+                        setParams({ run: run_id });
+                      } catch (e) { toast(String(e), "error"); }
+                    }}>↻ Replay</Button>
+                  )}
                 </span>
               )
             }
           />
+          {record?.hitl && record.status === "running" && (
+            <HitlPanel runId={record.id} output={record.hitl.output}
+              onDecided={() => api.run(record.id).then(setRecord).catch(() => {})} />
+          )}
           <EventTimeline events={events} />
           {record?.result && (
             <div className="border-t border-border p-4">
@@ -138,6 +160,66 @@ export function Runs() {
             {recent.length === 0 && <div className="px-4 py-6 text-sm text-muted">No runs yet.</div>}
           </div>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+// Shown while the run is blocked at a human-approval gate. Approve passes the
+// output on; editing replaces it; requesting changes sends the agent back with
+// feedback for another attempt.
+function HitlPanel({ runId, output, onDecided }: {
+  runId: string; output: string; onDecided: () => void;
+}) {
+  const toast = useToast();
+  const [mode, setMode] = useState<"review" | "edit" | "reject">("review");
+  const [edit, setEdit] = useState(output);
+  const [feedback, setFeedback] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function send(body: { decision: "approve" | "reject"; edit?: string; feedback?: string }) {
+    setBusy(true);
+    try { await api.hitlDecision(runId, body); onDecided(); }
+    catch (e) { toast(String(e), "error"); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="border-t border-warn/40 bg-warn/5 p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <Badge tone="warn">human input required</Badge>
+        <span className="text-xs text-muted">The workflow is paused until you decide.</span>
+      </div>
+      {mode === "review" && (
+        <pre className="mb-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-canvas p-3 text-xs text-ink">{output}</pre>
+      )}
+      {mode === "edit" && (
+        <Textarea className="mb-3 min-h-32 text-xs" value={edit} onChange={(e) => setEdit(e.target.value)} />
+      )}
+      {mode === "reject" && (
+        <Textarea className="mb-3 text-xs" placeholder="What should the agent change? This feedback goes back to it for another attempt."
+          value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {mode === "review" && (
+          <>
+            <Button onClick={() => send({ decision: "approve" })} disabled={busy}>✓ Approve</Button>
+            <Button variant="ghost" onClick={() => setMode("edit")} disabled={busy}>Edit output</Button>
+            <Button variant="ghost" onClick={() => setMode("reject")} disabled={busy}>Request changes</Button>
+          </>
+        )}
+        {mode === "edit" && (
+          <>
+            <Button onClick={() => send({ decision: "approve", edit })} disabled={busy}>✓ Approve edited</Button>
+            <Button variant="ghost" onClick={() => setMode("review")} disabled={busy}>Back</Button>
+          </>
+        )}
+        {mode === "reject" && (
+          <>
+            <Button onClick={() => send({ decision: "reject", feedback })} disabled={busy || !feedback.trim()}>Send back</Button>
+            <Button variant="ghost" onClick={() => setMode("review")} disabled={busy}>Back</Button>
+          </>
+        )}
       </div>
     </div>
   );

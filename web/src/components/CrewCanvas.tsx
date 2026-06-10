@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
 import {
   ReactFlow, Background, Controls, Handle, Position, MarkerType,
-  type Node, type Edge, type NodeProps, type NodeChange,
+  type Node, type Edge, type NodeProps, type NodeChange, type Connection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Bot, ListChecks, Plus, Trash2, Pause } from "lucide-react";
@@ -84,6 +84,7 @@ const noop = () => {};
 
 export function CrewCanvas({
   ws, sel = null, onSelect = noop, onAddAgent = noop, onAddTask = noop, onDelete = noop, onMove = noop,
+  onConnectTasks = noop, onDisconnectTasks = noop,
   readOnly = false, status = {},
 }: {
   ws: Workspace;
@@ -93,6 +94,8 @@ export function CrewCanvas({
   onAddTask?: () => void;
   onDelete?: (s: Sel) => void;
   onMove?: (nodeId: string, x: number, y: number) => void;
+  onConnectTasks?: (fromIdx: number, toIdx: number) => void; // "to" uses "from"'s output
+  onDisconnectTasks?: (fromIdx: number, toIdx: number) => void;
   readOnly?: boolean;
   status?: Record<string, NodeStatus>;
 }) {
@@ -133,13 +136,23 @@ export function CrewCanvas({
 
     const edges: Edge[] = [];
     ws.tasks.forEach((t, i) => {
+      const ctx = (t.context ?? []).filter((c) => c >= 0 && c < i);
       if (ws.agents.some((a) => a.id === t.agent))
         edges.push({ id: `own-${i}`, source: `agent:${t.agent}`, target: `task:${i}`,
           style: { stroke: "var(--color-node-agent)", strokeOpacity: 0.5 } });
-      if (i > 0)
+      // implied sequential order edge (skipped when an explicit context edge covers it)
+      if (i > 0 && !ctx.includes(i - 1))
         edges.push({ id: `seq-${i}`, source: `task:${i - 1}`, target: `task:${i}`,
           markerEnd: { type: MarkerType.ArrowClosed, color: "var(--color-node-task)" },
-          style: { stroke: "var(--color-node-task)" } });
+          style: { stroke: "var(--color-node-task)", strokeOpacity: 0.45 } });
+      // explicit data-flow edges: this task uses those tasks' outputs
+      ctx.forEach((c) => edges.push({
+        id: `ctx-${c}-${i}`, source: `task:${c}`, target: `task:${i}`, animated: true,
+        label: "output", labelStyle: { fill: "var(--color-muted)", fontSize: 9 },
+        labelBgStyle: { fill: "var(--color-elevated)", fillOpacity: 0.9 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "var(--color-brand)" },
+        style: { stroke: "var(--color-brand)" },
+      }));
     });
     return { nodes, edges };
   }, [ws, sel, status, readOnly, onSelect, onDelete]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -152,6 +165,21 @@ export function CrewCanvas({
       }
     }
   }, [onMove, readOnly]);
+
+  // Drag task -> task to declare "target uses source's output" (earlier tasks only).
+  const onConnect = useCallback((conn: Connection) => {
+    if (readOnly || !conn.source?.startsWith("task:") || !conn.target?.startsWith("task:")) return;
+    const from = Number(conn.source.slice(5));
+    const to = Number(conn.target.slice(5));
+    if (Number.isInteger(from) && Number.isInteger(to) && from < to) onConnectTasks(from, to);
+  }, [onConnectTasks, readOnly]);
+
+  // Click an explicit context edge to remove it.
+  const onEdgeClick = useCallback((_: React.MouseEvent, edge: Edge) => {
+    if (readOnly) return;
+    const m = /^ctx-(\d+)-(\d+)$/.exec(edge.id);
+    if (m) onDisconnectTasks(Number(m[1]), Number(m[2]));
+  }, [onDisconnectTasks, readOnly]);
 
   const empty = ws.agents.length === 0 && ws.tasks.length === 0;
 
@@ -176,9 +204,9 @@ export function CrewCanvas({
       )}
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes}
-        onNodesChange={onNodesChange}
+        onNodesChange={onNodesChange} onConnect={onConnect} onEdgeClick={onEdgeClick}
         fitView proOptions={{ hideAttribution: true }}
-        nodesConnectable={false} colorMode="dark"
+        nodesConnectable={!readOnly} colorMode="dark"
         onPaneClick={() => !readOnly && onSelect(null)}
       >
         <Background color="var(--color-border)" gap={20} />
