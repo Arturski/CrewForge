@@ -24,6 +24,7 @@ web/dist/
 secret.key
 *.key
 crewforge.db*
+knowledge_graphs/
 
 # Spike artifacts
 spikes/**/manifest.json

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, type KnowledgeBase, type SearchHit } from "../lib/api";
+import { api, type KbGraph, type KbGraphFact, type KnowledgeBase, type SearchHit } from "../lib/api";
 import { Badge, Button, Card, CardHeader, Input, Modal, Tabs, TabsList, TabsTrigger, TabsContent, Textarea } from "../components/ui";
+import { KbGraphView } from "../components/KbGraphView";
 import { useToast } from "../lib/toast";
-import { Database, GitBranch, Globe, Plus, Trash2, Upload } from "lucide-react";
+import { Database, GitBranch, Globe, Plus, Share2, Trash2, Upload } from "lucide-react";
 
 const SRC_TONE = { ready: "ok", processing: "running", error: "danger" } as const;
+const GRAPH_TONE = { none: "muted", building: "running", ready: "ok", error: "danger" } as const;
 
 export function Knowledge() {
   const toast = useToast();
@@ -97,7 +99,23 @@ function KbDetail({ kb, onChanged }: { kb: KnowledgeBase; onChanged: () => void 
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [facts, setFacts] = useState<KbGraphFact[]>([]);
+  const [graph, setGraph] = useState<KbGraph | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const loadGraph = useCallback(() => api.kbGraph(kb.id).then(setGraph).catch(() => setGraph(null)), [kb.id]);
+  useEffect(() => { loadGraph(); }, [loadGraph]);
+  // Poll while the graph build is running (progress lives on the KB record).
+  useEffect(() => {
+    if (graph?.graph.status !== "building") return;
+    const id = window.setInterval(loadGraph, 1500);
+    return () => window.clearInterval(id);
+  }, [graph, loadGraph]);
+
+  async function buildGraph() {
+    try { await api.buildKbGraph(kb.id); toast("Building knowledge graph…", "ok"); loadGraph(); }
+    catch (e) { toast(String(e), "error"); }
+  }
 
   async function addText() {
     if (!text.trim()) return;
@@ -132,7 +150,8 @@ function KbDetail({ kb, onChanged }: { kb: KnowledgeBase; onChanged: () => void 
     } catch (e) { toast(String(e), "error"); } finally { setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
   }
   async function search() {
-    try { const d = await api.searchKb(kb.id, q); setHits(d.results); } catch (e) { toast(String(e), "error"); }
+    try { const d = await api.searchKb(kb.id, q); setHits(d.results); setFacts(d.facts ?? []); }
+    catch (e) { toast(String(e), "error"); }
   }
 
   return (
@@ -194,6 +213,32 @@ function KbDetail({ kb, onChanged }: { kb: KnowledgeBase; onChanged: () => void 
           </div>
         </div>
 
+        {/* knowledge graph */}
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-medium text-muted">
+              <Share2 className="h-3.5 w-3.5" /> Knowledge graph
+              <Badge tone={GRAPH_TONE[graph?.graph.status ?? "none"]}>
+                {graph?.graph.status === "building" ? (graph.graph.progress || "building…")
+                  : graph?.graph.status === "ready" ? `${graph.graph.entities ?? 0} entities · ${graph.graph.relations ?? 0} relations`
+                  : graph?.graph.status === "error" ? "error" : "not built"}
+              </Badge>
+            </div>
+            <Button variant="ghost" onClick={buildGraph} disabled={graph?.graph.status === "building" || !kb.stats.chunks}>
+              {graph?.graph.status === "ready" ? "Update graph" : graph?.graph.status === "error" ? "Retry build" : "Build graph"}
+            </Button>
+          </div>
+          {graph?.graph.status === "error" && <div className="mb-2 text-xs text-danger">{graph.graph.error}</div>}
+          {graph && graph.entities.length > 0 ? (
+            <KbGraphView graph={graph} />
+          ) : (
+            <p className="text-xs text-muted">
+              Extracts entities &amp; relations from the ingested chunks with your default model (uses API tokens),
+              then search turns hybrid: vector hits are enriched with connected facts from the graph.
+            </p>
+          )}
+        </div>
+
         {/* test search */}
         <div>
           <div className="mb-2 text-xs font-medium text-muted">Test search</div>
@@ -209,6 +254,14 @@ function KbDetail({ kb, onChanged }: { kb: KnowledgeBase; onChanged: () => void 
                   <div className="line-clamp-3 text-ink">{h.text}</div>
                 </div>
               ))}
+              {facts.length > 0 && (
+                <div className="rounded-lg border border-border bg-canvas p-3 text-xs">
+                  <div className="mb-1 flex items-center gap-1.5 text-muted"><Share2 className="h-3 w-3" /> Related facts from the graph</div>
+                  {facts.map((f, i) => (
+                    <div key={i} className="text-ink">{f.source} <span className="text-muted">— {f.label} —</span> {f.target}</div>
+                  ))}
+                </div>
+              )}
               {!hits.length && <div className="text-xs text-muted">No results.</div>}
             </div>
           )}

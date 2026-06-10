@@ -132,7 +132,26 @@ async def add_kb_source(kb_id: str, req: Request) -> dict[str, Any]:
 @app.post("/api/knowledge/{kb_id}/search")
 async def search_knowledge(kb_id: str, req: Request) -> dict[str, Any]:
     b = await req.json() if await req.body() else {}
-    return {"results": knowledge_mod.search(kb_id, b.get("q") or b.get("query", ""))}
+    results = knowledge_mod.search(kb_id, b.get("q") or b.get("query", ""))
+    facts = knowledge_mod.related_facts(kb_id, [r["chunk_id"] for r in results])
+    return {"results": results, "facts": facts}
+
+
+@app.get("/api/knowledge/{kb_id}/graph")
+def get_knowledge_graph(kb_id: str) -> dict[str, Any]:
+    if not store.get_kb(kb_id):
+        raise HTTPException(404, "knowledge base not found")
+    return knowledge_mod.graph_overview(kb_id)
+
+
+@app.post("/api/knowledge/{kb_id}/graph/build")
+def build_knowledge_graph(kb_id: str) -> dict[str, Any]:
+    try:
+        return knowledge_mod.build_graph(kb_id)
+    except KeyError:
+        raise HTTPException(404, "knowledge base not found") from None
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
 
 
 # ---- Skill marketplace (official MCP registry) -----------------------------

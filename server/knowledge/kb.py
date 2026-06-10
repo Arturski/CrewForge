@@ -3,7 +3,9 @@
 Phase 1: file + pasted text -> vector index (keyless local embeddings).
 Phase 2: web page / docs-site crawl + GitHub repo ingestion, with live
 progress on the source row (the UI polls while status == processing).
-Kuzu graph extraction comes in Phase 3.
+Phase 3: Kuzu graph — explicit "Build graph" extracts entities/relations with
+the default LLM connection (incremental over ungraphed chunks; never runs
+automatically, so ingesting never spends API tokens), then search turns hybrid.
 """
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ import uuid
 from typing import Any
 
 from .. import store
-from . import vector
+from . import extract, graph, vector
 
 
 def _now() -> str:
@@ -46,6 +48,7 @@ def get_kb(kb_id: str) -> dict[str, Any] | None:
 
 def delete_kb(kb_id: str) -> None:
     store.delete_kb(kb_id)
+    graph.delete(kb_id)
 
 
 # -- ingestion ---------------------------------------------------------------
@@ -144,5 +147,64 @@ def search(kb_id: str, query: str, k: int = 5) -> list[dict[str, Any]]:
         return []
     qv = vector.embed([query])[0]
     hits = vector.rank(qv, items, k=k)
-    return [{"text": h["text"], "score": round(h["score"], 3), "source": h["meta"].get("source", "")}
+    return [{"chunk_id": h["chunk_id"], "text": h["text"], "score": round(h["score"], 3),
+             "source": h["meta"].get("source", "")}
             for h in hits]
+
+
+def related_facts(kb_id: str, chunk_ids: list[str], limit: int = 12) -> list[dict[str, str]]:
+    """Graph hop for hybrid retrieval: entity facts connected to these chunks."""
+    return graph.related_facts(kb_id, chunk_ids, limit=limit)
+
+
+# -- knowledge graph (Phase 3) -------------------------------------------------
+def _set_graph_state(kb_id: str, state: dict[str, Any]) -> None:
+    kb = store.get_kb(kb_id)
+    if kb:
+        kb["graph"] = state
+        store.save_kb(kb)
+
+
+def graph_overview(kb_id: str) -> dict[str, Any]:
+    kb = store.get_kb(kb_id) or {}
+    state = kb.get("graph") or {"status": "none"}
+    return {"graph": state, **graph.overview(kb_id)}
+
+
+def build_graph(kb_id: str) -> dict[str, Any]:
+    """Start (or resume) entity/relation extraction over ungraphed chunks."""
+    from .. import llms
+    kb = store.get_kb(kb_id)
+    if not kb:
+        raise KeyError(kb_id)
+    if (kb.get("graph") or {}).get("status") == "building":
+        return kb["graph"]
+    llm = llms.build()
+    if llm is None:
+        raise ValueError("No model configured — add an LLM connection in Settings → Models first.")
+    state = {"status": "building", "progress": "starting…"}
+    _set_graph_state(kb_id, state)
+    threading.Thread(target=_build_graph, args=(kb_id, llm), daemon=True).start()
+    return state
+
+
+def _build_graph(kb_id: str, llm: Any) -> None:
+    try:
+        chunks = store.get_chunks(kb_id)
+        done = graph.graphed_chunks(kb_id)
+        todo = [c for c in chunks if c["chunk_id"] not in done]
+        skipped = 0
+        for i, ch in enumerate(todo):
+            res = extract.extract(llm, ch["text"])
+            if not res["entities"]:
+                skipped += 1
+            graph.add_chunk(kb_id, ch["chunk_id"], ch["meta"].get("source", ""),
+                            res["entities"], res["relations"])
+            _set_graph_state(kb_id, {"status": "building",
+                                     "progress": f"{i + 1}/{len(todo)} chunks"})
+        stats = graph.stats(kb_id)
+        _set_graph_state(kb_id, {"status": "ready", **stats,
+                                 **({"skipped": skipped} if skipped else {})})
+    except Exception as e:  # noqa: BLE001 — surface any provider/parse failure on the KB
+        _set_graph_state(kb_id, {"status": "error", "error": f"{type(e).__name__}: {e}"[:300],
+                                 **graph.stats(kb_id)})

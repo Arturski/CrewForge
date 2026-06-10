@@ -86,9 +86,18 @@ export interface KnowledgeSource {
   status: "processing" | "ready" | "error"; chunks: number; error?: string | null;
   progress?: string | null; // live ingest status, e.g. "12/30 pages"
 }
+export interface KbGraphState {
+  status: "none" | "building" | "ready" | "error";
+  progress?: string; error?: string;
+  entities?: number; relations?: number; chunks?: number; skipped?: number;
+}
+export interface KbGraphEntity { name: string; label: string; type: string; degree: number }
+export interface KbGraphFact { source: string; label: string; target: string }
+export interface KbGraph { graph: KbGraphState; entities: KbGraphEntity[]; relations: KbGraphFact[] }
 export interface KnowledgeBase {
   id: string; name: string; description: string; embedder: string; created: string;
   stats: { sources: number; chunks: number }; sources?: KnowledgeSource[];
+  graph?: KbGraphState;
 }
 export interface SearchHit { text: string; score: number; source: string }
 
@@ -174,7 +183,9 @@ export const api = {
   deleteKnowledge: (id: string) => req<{ ok: boolean }>(`/api/knowledge/${id}`, { method: "DELETE" }),
   addKbSource: (id: string, body: { kind: string; text?: string; filename?: string; content_b64?: string; url?: string; crawl?: boolean; max_pages?: number }) =>
     req<KnowledgeSource>(`/api/knowledge/${id}/sources`, json("POST", body)),
-  searchKb: (id: string, q: string) => req<{ results: SearchHit[] }>(`/api/knowledge/${id}/search`, json("POST", { q })),
+  searchKb: (id: string, q: string) => req<{ results: SearchHit[]; facts: KbGraphFact[] }>(`/api/knowledge/${id}/search`, json("POST", { q })),
+  kbGraph: (id: string) => req<KbGraph>(`/api/knowledge/${id}/graph`),
+  buildKbGraph: (id: string) => req<KbGraphState>(`/api/knowledge/${id}/graph/build`, { method: "POST" }),
 
   registry: (q: string) => req<{ servers: RegistryServer[]; error?: string }>(`/api/registry?q=${encodeURIComponent(q)}`),
   mcpServers: () => req<{ servers: McpServer[] }>("/api/mcp"),

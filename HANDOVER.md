@@ -21,7 +21,7 @@ uv run uvicorn server.app:app --port 8765 # → http://localhost:8765
 ## Verify / quality gates
 ```bash
 uv run --extra dev ruff check server tests
-uv run --extra dev pytest -q          # 19 tests, no network/model download
+uv run --extra dev pytest -q          # 24 tests, no network/model download
 npm --prefix web run build            # tsc strict
 ```
 Browser-drive with the Playwright MCP; zero console errors is the bar. **Ship phase-by-phase: build → verify → commit → push.**
@@ -40,7 +40,7 @@ Browser-drive with the Playwright MCP; zero console errors is the bar. **Ship ph
 - `compiler/tools.py` — built-in crewai_tools catalog (kind=builtin). `compiler/knowledge_tool.py` — `search_<kb>` BaseTool.
 - `llms.py` — **multiple LLM connections** (list + default; keys encrypted). `secrets.py` — Fernet encryption (key in `secret.key` next to DB, gitignored).
 - `mcp.py` — connect/discover MCP servers (stdio/SSE/HTTP), runtime tool loading via `MCPServerAdapter`. `registry.py` — official MCP registry search (marketplace). `security.py` — honest risk assessment for MCP.
-- `knowledge/` — `vector.py` (fastembed local embeddings + chunk + cosine), `kb.py` (CRUD + background ingest with live `progress`), `web.py` (page fetch + same-host crawl, stdlib), `github.py` (public-repo tarball via codeload). `providers.py` — live model-list fetch per provider.
+- `knowledge/` — `vector.py` (fastembed local embeddings + chunk + cosine), `kb.py` (CRUD + background ingest with live `progress` + graph-build orchestration), `web.py` (page fetch + same-host crawl, stdlib), `github.py` (public-repo tarball via codeload), `graph.py` (embedded Kuzu per KB: Chunk/Entity nodes, MENTIONS/RELATED edges, overview + neighborhood queries), `extract.py` (LLM entity/relation extraction, tolerant JSON parse). `providers.py` — live model-list fetch per provider.
 - `personas.py` — 10 seeded persona defaults (then store-backed CRUD). `templates.py` — 3 starter workflow specs. `cli.py` — `crewforge` launcher.
 
 **Frontend** (`web/`, React 19 + Vite + Tailwind v4 + **shadcn-style on Radix** + XyFlow; routes lazy-loaded):
@@ -69,6 +69,7 @@ Browser-drive with the Playwright MCP; zero console errors is the bar. **Ship ph
 - **Task dependencies + manager** (`cdabf3d`): `task.context` (indices of earlier tasks) editable as canvas drag-edges or inspector checkboxes; hierarchical `manager_agent_id` (task-free agents only, else LLM manager); exporter emits both; task/agent delete reindexes context + layout.
 - **Replay + duplicate** (`3d36f87`): Replay button on terminal runs; `POST /api/workspaces/{id}/duplicate`.
 - **MCP env encryption** (`08c8c35`): MCP env values encrypted at rest, masked in all API responses.
+- **Knowledge Phase 3 — Kuzu graph layer**: per-KB embedded Kuzu graph (`knowledge/graph.py`), LLM entity/relation extraction (`knowledge/extract.py`, default LLM connection), explicit **Build graph** (never automatic — ingest stays token-free; incremental over ungraphed chunks, live progress on the KB record), hybrid retrieval (`search_<kb>` tool + test-search append "related facts" from the graph), `GET /api/knowledge/{id}/graph` + `POST .../graph/build`, XyFlow graph preview in the Knowledge page (ring layout, hubs centered).
 
 Commit history on `main` tells the phase-by-phase story (Phases 0–5 + follow-ups).
 
@@ -92,7 +93,9 @@ has not been executed with real keys; the wiring (spec → `llms.build`) is test
 - **`_public()` strips `_`-prefixed run-record keys** — keep thread primitives (`_cancel`, `_hitl_evt`, …) underscore-prefixed or JSON serialization of runs breaks.
 - **MiniMax**: use `hosted_vllm/<model>` + base `https://api.minimax.io/v1` (crewai rejects `openai/`/`anthropic/` for non-native model names; only `hosted_vllm` passes). MiniMax has **no `/models` endpoint** (Refresh hidden). The user still needs to confirm a live chat works with their key (Test connection) — if MiniMax's OpenAI-compatible `/v1` rejects the key, may need a MiniMax-native path.
 - **Dry-run gating**: planning, memory, `output_pydantic` only activate live (the `FakeLLM` can't do structured output / embeddings). Don't "fix" dry-run to enable them.
-- **fastembed** downloads `BAAI/bge-small-en-v1.5` (~130MB) on first embed; cached after. Knowledge vector search is keyless; **graph extraction (Phase 3) will need a provider**.
+- **fastembed** downloads `BAAI/bge-small-en-v1.5` (~130MB) on first embed; cached after. Knowledge vector search is keyless; **graph extraction needs a provider** (Build graph errors cleanly without one).
+- **Kuzu graphs** live under `knowledge_graphs/<kb_id>` next to the DB (gitignored). Kuzu locks a DB **per process** — `graph.py` caches Database handles and serializes writes; don't open the same KB graph from a second process while the server is running. The build is **explicit** (button/POST), incremental (only ungraphed chunks), and a per-chunk parse failure is skipped, not fatal.
+- A "Phase 3 demo" KB (`kb-05c6f862`, Northwind Robotics) is seeded in the local DB with a hand-built graph for demoing the viz/hybrid search — delete from the Knowledge page if unwanted. **Live LLM extraction has not been run with a real key** (only stub-tested); first real build will verify `extract.py` prompt quality.
 - **MCP stdio** servers (npx/uvx) can hang on cold start in sandboxes — connection path is correct; remote URL servers are more reliable to test.
 - **Built-in tools** are catalogued + exported but **not instantiated for live runs** (most need keys/args). Only **MCP** tools and **knowledge** tools execute live today.
 - **crewai event handlers** run on a thread pool → correlate via closures over the run record, not thread-locals (see `runner.py`).
@@ -101,12 +104,11 @@ has not been executed with real keys; the wiring (spec → `llms.build`) is test
 ---
 
 ## Remaining roadmap (priority order)
-1. **Knowledge Phase 3** — **Kuzu** graph layer: LLM entity/relation extraction → embedded graph, hybrid retrieval, graph viz (XyFlow). Needs `kuzu` dep + a provider for extraction (can't verify without a key).
-2. **Conditional tasks** (deferred from the task-dependency phase — needs a no-code condition builder design).
-3. **Built-in tool config + live execution** (catalogued + exported today, but not instantiated for live runs); **cost ($)** from tokens×pricing.
-4. **Scheduling/triggers** (cron/webhook); **train()/test()/batch**.
-5. Polish: inline marketplace drawer in Builder, final a11y/contrast/touch pass, onboarding tour; migrate Dashboard off `getLlm()` and delete the `/api/settings/llm*` shims.
-6. Verify a **live multi-provider run** end-to-end with real keys (multi-LLM, MCP tools, planning/memory) — everything is wired and dry-run-tested, but no real provider call has been made this cycle.
+1. **Conditional tasks** (deferred from the task-dependency phase — needs a no-code condition builder design).
+2. **Built-in tool config + live execution** (catalogued + exported today, but not instantiated for live runs); **cost ($)** from tokens×pricing.
+3. **Scheduling/triggers** (cron/webhook); **train()/test()/batch**.
+4. Polish: inline marketplace drawer in Builder, final a11y/contrast/touch pass, onboarding tour; migrate Dashboard off `getLlm()` and delete the `/api/settings/llm*` shims.
+5. Verify a **live multi-provider run** end-to-end with real keys (multi-LLM, MCP tools, planning/memory, a real graph build) — everything is wired and stub/dry-run-tested, but no real provider call has been made this cycle.
 
 ## References
 - Full design + phase history: `/Users/arthur/.claude/plans/system-design-see-the-crew-cheerful-lake.md` (PLAN v4 section = knowledge graph + this roadmap).

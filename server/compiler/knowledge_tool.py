@@ -31,6 +31,13 @@ def make_tool(kb: dict[str, Any]) -> BaseTool:
             hits = knowledge.search(kb_id, query, k=5)
             if not hits:
                 return "No relevant information found in the knowledge base."
-            return "\n\n".join(f"[source: {h['source']}]\n{h['text']}" for h in hits)
+            out = "\n\n".join(f"[source: {h['source']}]\n{h['text']}" for h in hits)
+            # Hybrid retrieval: pull entity facts connected to the hit chunks
+            # from the KB's graph (present only after a graph build).
+            facts = knowledge.related_facts(kb_id, [h["chunk_id"] for h in hits])
+            if facts:
+                out += "\n\nRelated facts from the knowledge graph:\n" + "\n".join(
+                    f"- {f['source']} — {f['label']} — {f['target']}" for f in facts)
+            return out
 
     return KnowledgeSearchTool()
