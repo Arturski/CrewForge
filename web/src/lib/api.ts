@@ -23,6 +23,7 @@ export interface WorkspaceSummary {
 export interface AgentSpec {
   id: string; role: string; goal: string; backstory: string;
   tools?: string[]; allow_delegation?: boolean;
+  llm_id?: string; // configured LLM connection; blank = workflow default
   // agents may carry any additional crewai field set via the advanced panel
   [key: string]: unknown;
 }
@@ -40,6 +41,7 @@ export interface Workspace {
   planning?: boolean; // crew plans before executing
   memory?: boolean; // crew memory (live runs)
   knowledge?: string[]; // workflow-level knowledge base ids
+  llm_id?: string; // configured LLM connection for the whole crew; blank = default
 }
 
 export interface RunEvent {
@@ -58,6 +60,12 @@ export interface RunRecord {
 
 export interface LlmSettings {
   configured: boolean; model: string; base_url: string;
+  temperature: number | null; api_key_set: boolean;
+}
+
+// One named LLM connection (multiple may be configured; one is the default).
+export interface LlmConfig {
+  id: string; name: string; model: string; base_url: string;
   temperature: number | null; api_key_set: boolean;
 }
 
@@ -142,10 +150,17 @@ export const api = {
   getLlm: () => req<LlmSettings>("/api/settings/llm"),
   saveLlm: (cfg: Partial<{ model: string; base_url: string; temperature: number; api_key: string; clear_api_key: boolean }>) =>
     req<{ ok: boolean }>("/api/settings/llm", json("PUT", cfg)),
-  testLlm: (cfg: Partial<{ model: string; base_url: string; api_key: string }>) =>
-    req<{ ok: boolean; sample?: string; error?: string }>("/api/settings/llm/test", json("POST", cfg)),
-  providerModels: (cfg: { provider: string; base_url?: string; api_key?: string }) =>
-    req<{ models: string[]; error?: string }>("/api/settings/llm/models", json("POST", cfg)),
+
+  // Multiple named LLM connections (selectable per workflow / per agent).
+  llms: () => req<{ llms: LlmConfig[]; default: string | null }>("/api/llms"),
+  saveLlm2: (cfg: Partial<{ id: string; name: string; model: string; base_url: string; temperature: number; api_key: string }>) =>
+    req<{ id: string; name: string }>("/api/llms", json("POST", cfg)),
+  deleteLlm: (id: string) => req<{ ok: boolean }>(`/api/llms/${id}`, { method: "DELETE" }),
+  setDefaultLlm: (id: string) => req<{ ok: boolean }>("/api/llms/default", json("PUT", { id })),
+  testLlm: (cfg: Partial<{ id: string; model: string; base_url: string; api_key: string }>) =>
+    req<{ ok: boolean; sample?: string; error?: string }>("/api/llms/test", json("POST", cfg)),
+  providerModels: (cfg: { provider: string; base_url?: string; api_key?: string; id?: string }) =>
+    req<{ models: string[]; error?: string }>("/api/llms/models", json("POST", cfg)),
 
   knowledgeBases: () => req<{ knowledge_bases: KnowledgeBase[] }>("/api/knowledge"),
   createKnowledge: (name: string, description = "") => req<KnowledgeBase>("/api/knowledge", json("POST", { name, description })),

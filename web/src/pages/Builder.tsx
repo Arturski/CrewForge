@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Code2, Download, Play, Plus, Trash2 } from "lucide-react";
 import {
-  api, type AgentSpec, type KnowledgeBase, type LlmSettings, type Manifest, type Persona, type TaskSpec, type ToolInfo, type Workspace,
+  api, type AgentSpec, type KnowledgeBase, type LlmConfig, type Manifest, type Persona, type TaskSpec, type ToolInfo, type Workspace,
 } from "../lib/api";
 import {
   Badge, Button, Card, CardHeader, Input, LabeledField, Modal, Select, Textarea, Toggle, Tooltip,
@@ -27,7 +27,8 @@ export function Builder() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [llm, setLlm] = useState<LlmSettings | null>(null);
+  const [llms, setLlms] = useState<LlmConfig[]>([]);
+  const [defaultLlm, setDefaultLlm] = useState<string | null>(null);
   const [dryRun, setDryRun] = useState(true);
   const [inputsOpen, setInputsOpen] = useState(false);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -37,7 +38,7 @@ export function Builder() {
   useEffect(() => {
     api.manifest().then(setManifest).catch(() => {});
     api.tools().then((d) => setTools(d.tools)).catch(() => {});
-    api.getLlm().then((c) => { setLlm(c); setDryRun(!c.configured); }).catch(() => {});
+    api.llms().then((d) => { setLlms(d.llms); setDefaultLlm(d.default); setDryRun(d.llms.length === 0); }).catch(() => {});
     api.personas().then((d) => setPersonas(d.personas)).catch(() => {});
     api.knowledgeBases().then((d) => setKbs(d.knowledge_bases)).catch(() => {});
   }, []);
@@ -130,6 +131,13 @@ export function Builder() {
   const agent = sel?.kind === "agent" ? ws.agents[sel.idx] : null;
   const task = sel?.kind === "task" ? ws.tasks[sel.idx] : null;
 
+  // LLM connections: resolve display names for the header/badge.
+  const configured = llms.length > 0;
+  const nameOf = (id?: string | null) => llms.find((l) => l.id === id)?.name;
+  const defaultName = nameOf(defaultLlm) ?? "no model";
+  // The model this run will actually use live: workflow override → default.
+  const liveName = nameOf(ws.llm_id) ?? defaultName;
+
   return (
     <div className="space-y-5">
       {/* header */}
@@ -151,13 +159,13 @@ export function Builder() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/models" title="Configure the model">
-            <Badge tone={dryRun ? "warn" : "ok"}>{dryRun ? "dry-run" : (llm?.model ? llm.model.split("/").pop() : "no model")}</Badge>
+          <Link to="/models" title="Configure model connections">
+            <Badge tone={dryRun ? "warn" : "ok"}>{dryRun ? "dry-run" : liveName}</Badge>
           </Link>
           <div className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1">
-            <span className="flex items-center gap-1 text-xs text-muted">Dry run<Tooltip text="ON = a free mock LLM (no key, no cost) for testing the flow. OFF = run with your configured model. Set a model under Models first." /></span>
+            <span className="flex items-center gap-1 text-xs text-muted">Dry run<Tooltip text="ON = a free mock LLM (no key, no cost) for testing the flow. OFF = run with your configured connections. Add one under Models first." /></span>
             <Toggle checked={dryRun} onChange={(v) => {
-              if (!v && !llm?.configured) { toast("No model set yet — configure one under Models to run live."); return; }
+              if (!v && !configured) { toast("No connections yet — add one under Models to run live."); return; }
               setDryRun(v);
             }} />
           </div>
@@ -201,6 +209,12 @@ export function Builder() {
           <Card>
             <CardHeader title="Workflow settings" />
             <div className="space-y-3 p-4">
+              <LabeledField label="Model" tip="The LLM connection this whole crew uses on live runs. Individual agents can override it. Manage connections under Models.">
+                <Select value={ws.llm_id ?? ""} onChange={(e) => mutate((w) => { w.llm_id = e.target.value || undefined; })}>
+                  <option value="">Default ({defaultName})</option>
+                  {llms.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </Select>
+              </LabeledField>
               <InlineToggle label="Planning" tip="The crew plans the whole workflow before executing — improves multi-step quality."
                 checked={!!ws.planning} onChange={(v) => mutate((w) => { w.planning = v; })} />
               <InlineToggle label="Memory" tip="Agents remember context across steps and past runs. Live runs only (needs a provider for embeddings)."
@@ -281,9 +295,12 @@ export function Builder() {
                   <InlineToggle label="Reasoning" tip="Have the agent plan and reflect before acting. Higher quality, a bit slower."
                     checked={!!(agent as Record<string, unknown>).reasoning} onChange={(v) => mutate((w) => { (w.agents[sel!.idx] as Record<string, unknown>).reasoning = v; })} />
                 </div>
-                <LabeledField label="Model (optional)" tip="Override the workflow's default model for just this agent (uses your configured provider key). Blank = use the default.">
-                  <Input placeholder={`default: ${llm?.model || "dry-run"}`} value={(agent.llm_model as string) ?? ""}
-                    onChange={(e) => mutate((w) => { w.agents[sel!.idx].llm_model = e.target.value; })} />
+                <LabeledField label="Model (optional)" tip="Override the workflow's model for just this agent. 'Use workflow default' follows the workflow's choice. Manage connections under Models.">
+                  <Select value={(agent.llm_id as string) ?? ""}
+                    onChange={(e) => mutate((w) => { w.agents[sel!.idx].llm_id = e.target.value || undefined; })}>
+                    <option value="">Use workflow default ({liveName})</option>
+                    {llms.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </Select>
                 </LabeledField>
                 <LabeledField label="Agent tools" tip="Tools only this agent can use, on top of any workflow-wide tools. Tools from integrations run live; built-in tools are also exported.">
                   <SkillPicker all={tools} value={agent.tools ?? []} onChange={(v) => mutate((w) => { w.agents[sel!.idx].tools = v; })} />
