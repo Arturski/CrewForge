@@ -80,6 +80,7 @@ export interface TemplateSummary {
 export interface KnowledgeSource {
   id: string; kb_id: string; kind: string; ref: string;
   status: "processing" | "ready" | "error"; chunks: number; error?: string | null;
+  progress?: string | null; // live ingest status, e.g. "12/30 pages"
 }
 export interface KnowledgeBase {
   id: string; name: string; description: string; embedder: string; created: string;
@@ -166,7 +167,7 @@ export const api = {
   createKnowledge: (name: string, description = "") => req<KnowledgeBase>("/api/knowledge", json("POST", { name, description })),
   knowledgeBase: (id: string) => req<KnowledgeBase>(`/api/knowledge/${id}`),
   deleteKnowledge: (id: string) => req<{ ok: boolean }>(`/api/knowledge/${id}`, { method: "DELETE" }),
-  addKbSource: (id: string, body: { kind: string; text?: string; filename?: string; content_b64?: string }) =>
+  addKbSource: (id: string, body: { kind: string; text?: string; filename?: string; content_b64?: string; url?: string; crawl?: boolean; max_pages?: number }) =>
     req<KnowledgeSource>(`/api/knowledge/${id}/sources`, json("POST", body)),
   searchKb: (id: string, q: string) => req<{ results: SearchHit[] }>(`/api/knowledge/${id}/search`, json("POST", { q })),
 

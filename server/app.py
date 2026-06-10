@@ -116,9 +116,16 @@ async def add_kb_source(kb_id: str, req: Request) -> dict[str, Any]:
     if not store.get_kb(kb_id):
         raise HTTPException(404, "knowledge base not found")
     b = await req.json()
-    if b.get("kind") == "file":
+    kind = b.get("kind")
+    if kind == "file":
         content = base64.b64decode((b.get("content_b64") or "").split(",")[-1] or "")
         return knowledge_mod.add_source(kb_id, "file", filename=b.get("filename"), content=content)
+    if kind in ("url", "github"):
+        url = (b.get("url") or "").strip()
+        if not url:
+            raise HTTPException(400, "url is required")
+        return knowledge_mod.add_source(kb_id, kind, url=url, crawl=bool(b.get("crawl")),
+                                        max_pages=min(int(b.get("max_pages") or 30), 100))
     return knowledge_mod.add_source(kb_id, "text", text=b.get("text", ""))
 
 
