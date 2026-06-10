@@ -21,7 +21,7 @@ uv run uvicorn server.app:app --port 8765 # → http://localhost:8765
 ## Verify / quality gates
 ```bash
 uv run --extra dev ruff check server tests
-uv run --extra dev pytest -q          # 8 tests, no network/model download
+uv run --extra dev pytest -q          # 19 tests, no network/model download
 npm --prefix web run build            # tsc strict
 ```
 Browser-drive with the Playwright MCP; zero console errors is the bar. **Ship phase-by-phase: build → verify → commit → push.**
@@ -40,7 +40,7 @@ Browser-drive with the Playwright MCP; zero console errors is the bar. **Ship ph
 - `compiler/tools.py` — built-in crewai_tools catalog (kind=builtin). `compiler/knowledge_tool.py` — `search_<kb>` BaseTool.
 - `llms.py` — **multiple LLM connections** (list + default; keys encrypted). `secrets.py` — Fernet encryption (key in `secret.key` next to DB, gitignored).
 - `mcp.py` — connect/discover MCP servers (stdio/SSE/HTTP), runtime tool loading via `MCPServerAdapter`. `registry.py` — official MCP registry search (marketplace). `security.py` — honest risk assessment for MCP.
-- `knowledge/` — `vector.py` (fastembed local embeddings + chunk + cosine), `kb.py` (CRUD + background ingest of text/pdf/docx/md/txt/csv). `providers.py` — live model-list fetch per provider.
+- `knowledge/` — `vector.py` (fastembed local embeddings + chunk + cosine), `kb.py` (CRUD + background ingest with live `progress`), `web.py` (page fetch + same-host crawl, stdlib), `github.py` (public-repo tarball via codeload). `providers.py` — live model-list fetch per provider.
 - `personas.py` — 10 seeded persona defaults (then store-backed CRUD). `templates.py` — 3 starter workflow specs. `cli.py` — `crewforge` launcher.
 
 **Frontend** (`web/`, React 19 + Vite + Tailwind v4 + **shadcn-style on Radix** + XyFlow; routes lazy-loaded):
@@ -63,32 +63,33 @@ Browser-drive with the Playwright MCP; zero console errors is the bar. **Ship ph
 - **Knowledge (Phase 1)**: keyless vector RAG — ingest text/files, semantic search, `search_<kb>` tool attachable to agents/workflow.
 - **Models**: provider presets + **live model fetch** (↻ Refresh) + free-text; **MiniMax** fixed (`hosted_vllm/` prefix, no /models endpoint, current models).
 - **Code export**, **secrets vault** (encrypted keys), **autosave**, **responsive sidebar**, **route code-splitting**, shadcn/Radix foundation, CI (ruff+pytest+tsc), SECURITY.md, ROADMAP.md.
+- **Multi-LLM frontend** (`9328d5d`): connection list in Settings; per-workflow (`ws.llm_id`) + per-agent (`agent.llm_id`) selects in Builder.
+- **Knowledge Phase 2** (`8125c5d`): web page ingest + same-host docs-site crawl (`knowledge/web.py`, stdlib only) + GitHub repo via codeload tarball (`knowledge/github.py`); live `src.progress` ("12/30 pages") polled by the UI.
+- **Stop/cancel + live HITL** (`03711e8`): `POST /api/runs/{id}/cancel` (aborts at next LLM call via `_wrap_cancel` shadowing `llm.call`) and `POST /api/runs/{id}/input`; the guardrail gate now **blocks** on approve / edit-output / request-changes (reject feeds crewai's revision loop); run status gained `cancelled`; Runs page has Stop button + HITL panel.
+- **Task dependencies + manager** (`cdabf3d`): `task.context` (indices of earlier tasks) editable as canvas drag-edges or inspector checkboxes; hierarchical `manager_agent_id` (task-free agents only, else LLM manager); exporter emits both; task/agent delete reindexes context + layout.
+- **Replay + duplicate** (`3d36f87`): Replay button on terminal runs; `POST /api/workspaces/{id}/duplicate`.
+- **MCP env encryption** (`08c8c35`): MCP env values encrypted at rest, masked in all API responses.
 
 Commit history on `main` tells the phase-by-phase story (Phases 0–5 + follow-ups).
 
 ---
 
-## ⚠️ IN-FLIGHT — finish this first (multiple LLM connections)
-Backend is DONE and on `main` (`901e576`); the **frontend is NOT**. Today the Models page still edits the *single default* connection via compat shims (`/api/settings/llm*`), which works. To deliver true multi-LLM:
+## ✅ No work in flight
+The multi-LLM frontend (formerly the in-flight item) shipped in `9328d5d`: Settings is a
+connection list (add/edit/delete/set-default), Builder has a workflow LLM select
+(`ws.llm_id`) and per-agent selects (`agent.llm_id`). The legacy `/api/settings/llm*`
+compat shims remain only because `Dashboard.tsx` still calls `getLlm()` for its
+"active model" stat — migrate that, then delete the shims.
 
-**Goal (user's words):** "select per workflow and per agent from the list of LLMs I have configured."
-
-**Backend already provides** (use these):
-- `GET /api/llms` → `{ llms: [{id,name,model,base_url,temperature,api_key_set}], default }`
-- `POST /api/llms` (upsert: omit `id` to create) · `DELETE /api/llms/{id}` · `PUT /api/llms/default {id}`
-- `POST /api/llms/test` (`{id}` or inline `{model,base_url,api_key}`) · `POST /api/llms/models` (live model list)
-- Runner already resolves `spec.llm_id` (workflow) and `agent.llm_id` (per-agent) from the list.
-
-**Frontend TODO:**
-1. `web/src/lib/api.ts` — add `llms()`, `saveLlm2(cfg)`→POST /api/llms, `deleteLlm(id)`, `setDefaultLlm(id)`, repoint `testLlm`/`providerModels` to `/api/llms/*`. Add `LlmConfig` type.
-2. `web/src/pages/Settings.tsx` — rebuild as a **list of connections** (cards: name, model, default badge; add/edit via the existing provider form; delete; set-default). Reuse the provider preset + Refresh + Test logic that's already there.
-3. `web/src/pages/Builder.tsx` — add a **workflow LLM select** (Workflow settings card → `ws.llm_id`) and replace the agent "Model (optional)" free-text with a **per-agent LLM select** (`agent.llm_id`, options = "Use workflow default" + configured connections). Model chip shows the resolved default name.
-4. Remove the legacy `/api/settings/llm*` compat shims from `app.py` once the UI no longer calls them (optional cleanup).
-Verify: configure 2 connections, set one default, override one agent to the other, run live, confirm each agent uses its model.
+One unverified path: a **live** multi-provider run (each agent on its own provider)
+has not been executed with real keys; the wiring (spec → `llms.build`) is test-covered.
 
 ---
 
 ## Known gotchas (will bite you)
+- **HITL gates now block in every mode** (incl. dry-run): a `human_input` task pauses the run until you decide in the Run console (or `POST /api/runs/{id}/input`). A walked-away run stays `running` — use Stop. Tests answer gates programmatically via `RunManager.hitl_decision`.
+- **Cancellation is cooperative**: it lands at the next `llm.call` or HITL wait. A run stuck inside a single long provider call won't die until that call returns.
+- **`_public()` strips `_`-prefixed run-record keys** — keep thread primitives (`_cancel`, `_hitl_evt`, …) underscore-prefixed or JSON serialization of runs breaks.
 - **MiniMax**: use `hosted_vllm/<model>` + base `https://api.minimax.io/v1` (crewai rejects `openai/`/`anthropic/` for non-native model names; only `hosted_vllm` passes). MiniMax has **no `/models` endpoint** (Refresh hidden). The user still needs to confirm a live chat works with their key (Test connection) — if MiniMax's OpenAI-compatible `/v1` rejects the key, may need a MiniMax-native path.
 - **Dry-run gating**: planning, memory, `output_pydantic` only activate live (the `FakeLLM` can't do structured output / embeddings). Don't "fix" dry-run to enable them.
 - **fastembed** downloads `BAAI/bge-small-en-v1.5` (~130MB) on first embed; cached after. Knowledge vector search is keyless; **graph extraction (Phase 3) will need a provider**.
@@ -100,14 +101,12 @@ Verify: configure 2 connections, set one default, override one agent to the othe
 ---
 
 ## Remaining roadmap (priority order)
-1. **Finish multi-LLM frontend** (above) — immediate.
-2. **Knowledge Phase 2** — web page / docs-site crawl + GitHub repo ingestion + background-job progress UI (`server/knowledge/jobs.py`, sources already have status).
-3. **Knowledge Phase 3** — **Kuzu** graph layer: LLM entity/relation extraction → embedded graph, hybrid retrieval, graph viz (XyFlow). Needs `kuzu` dep + a provider for extraction.
-4. **Stop/cancel a running run** + **live HITL** (real approve/edit prompt in the Run console; today the guardrail gate auto-approves).
-5. **Task-dependency edges on the canvas** → `task.context`; expose conditional tasks. **Hierarchical manager** selection UI.
-6. **Built-in tool config + live execution**; **replay/fork/duplicate**; **cost ($)** from tokens×pricing.
-7. **Scheduling/triggers** (cron/webhook); **train()/test()/batch**.
-8. Polish: inline marketplace drawer in Builder, encrypt MCP env secrets, final a11y/contrast/touch pass, onboarding tour.
+1. **Knowledge Phase 3** — **Kuzu** graph layer: LLM entity/relation extraction → embedded graph, hybrid retrieval, graph viz (XyFlow). Needs `kuzu` dep + a provider for extraction (can't verify without a key).
+2. **Conditional tasks** (deferred from the task-dependency phase — needs a no-code condition builder design).
+3. **Built-in tool config + live execution** (catalogued + exported today, but not instantiated for live runs); **cost ($)** from tokens×pricing.
+4. **Scheduling/triggers** (cron/webhook); **train()/test()/batch**.
+5. Polish: inline marketplace drawer in Builder, final a11y/contrast/touch pass, onboarding tour; migrate Dashboard off `getLlm()` and delete the `/api/settings/llm*` shims.
+6. Verify a **live multi-provider run** end-to-end with real keys (multi-LLM, MCP tools, planning/memory) — everything is wired and dry-run-tested, but no real provider call has been made this cycle.
 
 ## References
 - Full design + phase history: `/Users/arthur/.claude/plans/system-design-see-the-crew-cheerful-lake.md` (PLAN v4 section = knowledge graph + this roadmap).
