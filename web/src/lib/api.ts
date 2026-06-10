@@ -30,6 +30,7 @@ export interface AgentSpec {
 export interface TaskSpec {
   agent: string; description: string; expected_output: string;
   human_input?: boolean; name?: string; rules?: string;
+  context?: number[]; // indices of earlier tasks whose output feeds this one
   [key: string]: unknown;
 }
 export interface Workspace {
@@ -42,6 +43,7 @@ export interface Workspace {
   memory?: boolean; // crew memory (live runs)
   knowledge?: string[]; // workflow-level knowledge base ids
   llm_id?: string; // configured LLM connection for the whole crew; blank = default
+  manager_agent_id?: string; // hierarchical only: agent that manages the crew
 }
 
 export interface RunEvent {

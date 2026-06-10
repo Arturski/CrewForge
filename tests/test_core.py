@@ -108,3 +108,62 @@ def test_adapter_phase3_features():
     assert crew.tasks[1].output_pydantic is not None  # structured output (live path)
     fields = crew.tasks[1].output_pydantic.model_fields
     assert set(fields) == {"title", "score"}
+
+
+def test_adapter_task_context_and_manager_agent():
+    spec = {
+        "process": "hierarchical",
+        "manager_agent_id": "boss",
+        "agents": [
+            {"id": "boss", "role": "Manager", "goal": "g", "backstory": "b"},
+            {"id": "a1", "role": "Analyst", "goal": "g", "backstory": "b"},
+            {"id": "a2", "role": "Writer", "goal": "g", "backstory": "b"},
+        ],
+        "tasks": [
+            {"agent": "a1", "name": "research", "description": "d", "expected_output": "o"},
+            {"agent": "a2", "name": "write", "description": "d", "expected_output": "o",
+             "context": [0]},
+            # later/self refs must be dropped, valid earlier refs kept
+            {"agent": "a2", "name": "review", "description": "d", "expected_output": "o",
+             "context": [0, 1, 2, 99]},
+        ],
+    }
+    crew = build_crew(spec)
+    assert crew.tasks[1].context == [crew.tasks[0]]
+    assert crew.tasks[2].context == [crew.tasks[0], crew.tasks[1]]
+    # manager agent honored and excluded from the worker list
+    assert crew.manager_agent is not None and crew.manager_agent.role == "Manager"
+    assert all(a.role != "Manager" for a in crew.agents)
+
+
+def test_adapter_manager_with_tasks_falls_back_to_llm():
+    spec = {
+        "process": "hierarchical",
+        "manager_agent_id": "a1",  # has a task -> must fall back to manager_llm
+        "agents": [{"id": "a1", "role": "Analyst", "goal": "g", "backstory": "b"}],
+        "tasks": [{"agent": "a1", "name": "t", "description": "d", "expected_output": "o"}],
+    }
+    crew = build_crew(spec)
+    assert crew.manager_agent is None
+    assert crew.manager_llm is not None
+    assert len(crew.agents) == 1
+
+
+def test_exporter_context_and_manager():
+    spec = {
+        "name": "Ctx Crew", "process": "hierarchical", "manager_agent_id": "boss",
+        "agents": [
+            {"id": "boss", "role": "Manager", "goal": "g", "backstory": "b"},
+            {"id": "a1", "role": "Analyst", "goal": "g", "backstory": "b"},
+        ],
+        "tasks": [
+            {"agent": "a1", "name": "research", "description": "d", "expected_output": "o"},
+            {"agent": "a1", "name": "write", "description": "d", "expected_output": "o",
+             "context": [0]},
+        ],
+    }
+    files = export_files(spec)
+    tasks_cfg = yaml.safe_load(files["config/tasks.yaml"])
+    assert tasks_cfg["write"]["context"] == ["research"]
+    assert 'agents.pop("boss")' in files["crew.py"]
+    assert "manager_agent=manager" in files["crew.py"]

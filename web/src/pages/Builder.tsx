@@ -14,6 +14,35 @@ import { useToast } from "../lib/toast";
 type Sel = { kind: "agent" | "task"; idx: number } | null;
 const newId = (p: string) => `${p}-${Math.random().toString(36).slice(2, 7)}`;
 
+// Removing a task shifts every later index: re-point context refs and
+// canvas layout keys, or they'd silently attach to the wrong task.
+function removeTask(w: Workspace, i: number) {
+  w.tasks.splice(i, 1);
+  w.tasks.forEach((t) => {
+    if (t.context) {
+      t.context = t.context.filter((c) => c !== i).map((c) => (c > i ? c - 1 : c));
+      if (!t.context.length) delete t.context;
+    }
+  });
+  if (w.layout) {
+    const next: Record<string, { x: number; y: number }> = {};
+    for (const [k, v] of Object.entries(w.layout)) {
+      const m = /^task:(\d+)$/.exec(k);
+      if (!m) { next[k] = v; continue; }
+      const n = Number(m[1]);
+      if (n === i) continue;
+      next[n > i ? `task:${n - 1}` : k] = v;
+    }
+    w.layout = next;
+  }
+}
+
+function removeAgent(w: Workspace, i: number) {
+  const removed = w.agents[i]?.id;
+  w.agents.splice(i, 1);
+  if (removed && w.manager_agent_id === removed) delete w.manager_agent_id;
+}
+
 export function Builder() {
   const [params] = useSearchParams();
   const wsId = params.get("ws");
@@ -184,11 +213,20 @@ export function Builder() {
           onAddTask={addTask}
           onDelete={(s) => {
             if (!s) return;
-            if (s.kind === "agent") mutate((w) => { w.agents.splice(s.idx, 1); });
-            else mutate((w) => { w.tasks.splice(s.idx, 1); });
+            if (s.kind === "agent") mutate((w) => removeAgent(w, s.idx));
+            else mutate((w) => removeTask(w, s.idx));
             setSel(null);
           }}
           onMove={(nodeId, x, y) => mutate((w) => { w.layout = { ...(w.layout ?? {}), [nodeId]: { x, y } }; })}
+          onConnectTasks={(from, to) => mutate((w) => {
+            const t = w.tasks[to];
+            t.context = [...new Set([...(t.context ?? []), from])].sort((a, b) => a - b);
+          })}
+          onDisconnectTasks={(from, to) => mutate((w) => {
+            const t = w.tasks[to];
+            t.context = (t.context ?? []).filter((c) => c !== from);
+            if (!t.context.length) delete t.context;
+          })}
         />
       </Card>
 
@@ -215,6 +253,19 @@ export function Builder() {
                   {llms.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </Select>
               </LabeledField>
+              {ws.process === "hierarchical" && (
+                <LabeledField label="Manager" tip="Who coordinates the crew and delegates tasks. 'LLM manager' is a model acting as manager; or pick one of your agents — but a managing agent can't have tasks of its own.">
+                  <Select value={ws.manager_agent_id ?? ""} onChange={(e) => mutate((w) => {
+                    if (e.target.value) w.manager_agent_id = e.target.value; else delete w.manager_agent_id;
+                  })}>
+                    <option value="">LLM manager (workflow model)</option>
+                    {ws.agents.map((a) => {
+                      const hasTasks = ws.tasks.some((t) => t.agent === a.id);
+                      return <option key={a.id} value={a.id} disabled={hasTasks}>{a.role || "Untitled agent"}{hasTasks ? " (has tasks)" : ""}</option>;
+                    })}
+                  </Select>
+                </LabeledField>
+              )}
               <InlineToggle label="Planning" tip="The crew plans the whole workflow before executing — improves multi-step quality."
                 checked={!!ws.planning} onChange={(v) => mutate((w) => { w.planning = v; })} />
               <InlineToggle label="Memory" tip="Agents remember context across steps and past runs. Live runs only (needs a provider for embeddings)."
@@ -247,7 +298,7 @@ export function Builder() {
                 <Row key={a.id} active={sel?.kind === "agent" && sel.idx === i}
                   dot="var(--color-node-agent)" label={a.role || "Untitled agent"}
                   onClick={() => setSel({ kind: "agent", idx: i })}
-                  onDelete={() => { mutate((w) => w.agents.splice(i, 1)); setSel(null); }} />
+                  onDelete={() => { mutate((w) => removeAgent(w, i)); setSel(null); }} />
               ))}
               {!ws.agents.length && <P>No agents yet.</P>}
             </div>
@@ -260,7 +311,7 @@ export function Builder() {
                   dot="var(--color-node-task)" label={t.name || t.description.slice(0, 28) || "Untitled task"}
                   badge={t.human_input ? "HITL" : undefined}
                   onClick={() => setSel({ kind: "task", idx: i })}
-                  onDelete={() => { mutate((w) => w.tasks.splice(i, 1)); setSel(null); }} />
+                  onDelete={() => { mutate((w) => removeTask(w, i)); setSel(null); }} />
               ))}
               {!ws.tasks.length && <P>No tasks yet.</P>}
             </div>
@@ -350,6 +401,28 @@ export function Builder() {
                 <LabeledField label="Strict rules" tip="Hard constraints the agent MUST follow (one per line). Enforced as step-by-step reasoning rules for higher-quality, reliable output.">
                   <Textarea placeholder={"e.g.\n- Cite a source for every claim\n- Never invent figures"} value={(task as Record<string, unknown>).rules as string ?? ""} onChange={(e) => mutate((w) => { (w.tasks[sel!.idx] as Record<string, unknown>).rules = e.target.value; })} />
                 </LabeledField>
+                {sel!.idx > 0 && (
+                  <div>
+                    <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
+                      Uses output from<Tooltip text="Feed earlier tasks' results into this one as context. You can also drag an edge between tasks on the canvas; click an edge to remove it." />
+                    </div>
+                    <div className="space-y-1">
+                      {ws.tasks.slice(0, sel!.idx).map((t2, ti) => (
+                        <label key={ti} className="flex cursor-pointer items-center gap-2 text-xs text-ink">
+                          <input type="checkbox" className="accent-[var(--color-brand)]"
+                            checked={(task.context ?? []).includes(ti)}
+                            onChange={(e) => mutate((w) => {
+                              const tt = w.tasks[sel!.idx];
+                              const set = new Set(tt.context ?? []);
+                              if (e.target.checked) set.add(ti); else set.delete(ti);
+                              if (set.size) tt.context = [...set].sort((a, b) => a - b); else delete tt.context;
+                            })} />
+                          <span className="truncate">{t2.name || t2.description?.slice(0, 40) || `task ${ti + 1}`}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <InlineToggle label="Require human approval" tip="Pause for your review before the result passes to the next step."
                   checked={!!task.human_input} onChange={(v) => mutate((w) => { w.tasks[sel!.idx].human_input = v; })} />
                 <InlineToggle label="Run in parallel" tip="Run this task asynchronously alongside others (advanced)."

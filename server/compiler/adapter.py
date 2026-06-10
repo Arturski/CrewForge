@@ -118,6 +118,12 @@ def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None,
             tkwargs["guardrail"] = hitl_gate
         if t.get("async_execution"):
             tkwargs["async_execution"] = True
+        # Explicit data-flow dependencies: indices of EARLIER tasks whose output
+        # feeds this one (later/self refs are dropped — output wouldn't exist yet).
+        ctx = [tasks[c] for c in (t.get("context") or [])
+               if isinstance(c, int) and 0 <= c < len(tasks)]
+        if ctx:
+            tkwargs["context"] = ctx
         if live and t.get("output_schema"):
             model = _output_model(t.get("name", ""), t["output_schema"])
             if model is not None:
@@ -143,5 +149,14 @@ def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None,
     if live and spec.get("memory"):
         crew_kwargs["memory"] = True
     if process == Process.hierarchical:
-        crew_kwargs["manager_llm"] = llm
+        # A designated agent can manage the crew; crewai requires the manager
+        # to be neither in the agents list nor assigned to a task, so we only
+        # honor the pick when it's task-free (else fall back to an LLM manager).
+        mgr_id = spec.get("manager_agent_id")
+        assigned = {t.get("agent") for t in spec.get("tasks", [])}
+        if mgr_id and mgr_id in agents and mgr_id not in assigned:
+            crew_kwargs["manager_agent"] = agents[mgr_id]
+            crew_kwargs["agents"] = [ag for aid, ag in agents.items() if aid != mgr_id]
+        else:
+            crew_kwargs["manager_llm"] = llm
     return Crew(**crew_kwargs)
