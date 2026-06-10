@@ -58,6 +58,7 @@ export interface RunRecord {
   dry_run: boolean; spec_name: string; started_at: string; finished_at: string | null;
   result: string | null; error: string | null; event_count: number; tokens?: number;
   workspace_id?: string;
+  inputs?: Record<string, string>; // run-time variables this run started with
   hitl?: { output: string; since: string } | null; // set while blocked at a human gate
 }
 
@@ -142,6 +143,7 @@ export const api = {
   workspace: (id: string) => req<Workspace>(`/api/workspaces/${id}`),
   createWorkspace: (name: string, template?: string) =>
     req<Workspace>("/api/workspaces", json("POST", { name, ...(template ? { template } : {}) })),
+  duplicateWorkspace: (id: string) => req<Workspace>(`/api/workspaces/${id}/duplicate`, { method: "POST" }),
   personas: () => req<{ personas: Persona[] }>("/api/personas"),
   savePersona: (p: Partial<Persona>) => req<Persona>("/api/personas", json("POST", p)),
   deletePersona: (id: string) => req<{ ok: boolean }>(`/api/personas/${id}`, { method: "DELETE" }),

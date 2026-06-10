@@ -308,6 +308,17 @@ async def create_workspace(req: Request) -> dict[str, Any]:
     return store.save_workspace(ws)
 
 
+@app.post("/api/workspaces/{ws_id}/duplicate")
+def duplicate_workspace(ws_id: str) -> dict[str, Any]:
+    ws = store.get_workspace(ws_id)
+    if not ws:
+        raise HTTPException(404, "workspace not found")
+    dup = copy.deepcopy(ws)
+    dup["id"] = f"ws-{uuid.uuid4().hex[:8]}"
+    dup["name"] = f"{ws.get('name', 'Crew')} (copy)"
+    return store.save_workspace(dup)
+
+
 @app.get("/api/workspaces/{workspace_id}")
 def get_workspace(workspace_id: str) -> dict[str, Any]:
     ws = store.get_workspace(workspace_id)

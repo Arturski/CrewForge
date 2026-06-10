@@ -30,6 +30,10 @@ export function Dashboard() {
     if (!confirm("Delete this workflow?")) return;
     await api.deleteWorkspace(id); toast("Deleted", "ok"); load();
   }
+  async function duplicate(id: string) {
+    try { const ws = await api.duplicateWorkspace(id); toast(`Duplicated as "${ws.name}"`, "ok"); load(); }
+    catch (e) { toast(String(e), "error"); }
+  }
 
   return (
     <div className="space-y-6">
@@ -61,6 +65,7 @@ export function Dashboard() {
                 <Pill color="var(--color-node-agent)">{w.agents} agents</Pill>
                 <Pill color="var(--color-node-task)">{w.tasks} tasks</Pill>
                 <Button variant="ghost" onClick={() => navigate(`/builder?ws=${w.id}`)}>Open</Button>
+                <button onClick={() => duplicate(w.id)} className="text-muted opacity-0 transition group-hover:opacity-100 hover:text-ink" title="Duplicate">⧉</button>
                 <button onClick={() => remove(w.id)} className="text-muted opacity-0 transition group-hover:opacity-100 hover:text-danger" title="Delete">✕</button>
               </div>
             </div>

@@ -111,6 +111,14 @@ export function Runs() {
                       catch (e) { toast(String(e), "error"); }
                     }}>■ Stop</Button>
                   )}
+                  {record.status !== "running" && record.workspace_id && (
+                    <Button variant="ghost" onClick={async () => {
+                      try {
+                        const { run_id } = await api.startRun(record.workspace_id!, record.dry_run, record.inputs ?? {});
+                        setParams({ run: run_id });
+                      } catch (e) { toast(String(e), "error"); }
+                    }}>↻ Replay</Button>
+                  )}
                 </span>
               )
             }
