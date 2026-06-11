@@ -91,10 +91,9 @@ the `getLlm`/`saveLlm`/`LlmSettings` client API are **gone** — `Dashboard.tsx`
 derives its "active model" stat from `api.llms()` (the default connection). The only
 LLM endpoints are `/api/llms*` (`/models`, `/test`, `/default`).
 
-One unverified path: a **live** multi-provider run (each agent on its own provider)
-has not been executed with real keys; the wiring (spec → `llms.build`) is test-covered.
-Every page has been browser-verified (Playwright) with **zero console errors**, incl.
-the full batch lifecycle (launch → grouped Runs view → per-row drill-in) on desktop + mobile.
+**Live MiniMax verification complete** (2026-06-11): single run ("The capital of France is Paris.", 108 tokens, $0.000028), and a 3-case eval with judge checks (100% pass, $0.000084, `PASS/FAIL` parsing confirmed). Every page has been browser-verified (Playwright) with **zero console errors**, incl. the full batch lifecycle (launch → grouped Runs view → per-row drill-in) on desktop + mobile.
+
+One remaining gap: a truly **multi-provider** run (each agent pinned to a different LLM connection) hasn't been exercised with real keys, but the wiring (`spec → llms.resolve(agent.llm_id)`) is unit-covered.
 
 ---
 
@@ -102,7 +101,7 @@ the full batch lifecycle (launch → grouped Runs view → per-row drill-in) on 
 - **HITL gates now block in every mode** (incl. dry-run): a `human_input` task pauses the run until you decide in the Run console (or `POST /api/runs/{id}/input`). A walked-away run stays `running` — use Stop. Tests answer gates programmatically via `RunManager.hitl_decision`.
 - **Cancellation is cooperative**: it lands at the next `llm.call` or HITL wait. A run stuck inside a single long provider call won't die until that call returns.
 - **`_public()` strips `_`-prefixed run-record keys** — keep thread primitives (`_cancel`, `_hitl_evt`, …) underscore-prefixed or JSON serialization of runs breaks.
-- **MiniMax**: use `hosted_vllm/<model>` + base `https://api.minimax.io/v1` (crewai rejects `openai/`/`anthropic/` for non-native model names; only `hosted_vllm` passes). MiniMax has **no `/models` endpoint** (Refresh hidden). The user still needs to confirm a live chat works with their key (Test connection) — if MiniMax's OpenAI-compatible `/v1` rejects the key, may need a MiniMax-native path.
+- **MiniMax**: use base URL `https://api.minimaxi.chat/v1` and model `MiniMax-Text-01` (or other MiniMax model names). The `api.minimax.chat` domain returns 401; the `api.minimaxi.chat` OpenAI-compat endpoint is the working one. **Verified live** (2026-06-11): connection test, single run, and eval judge all passed.
 - **Dry-run gating**: planning, memory, `output_pydantic` only activate live (the `FakeLLM` can't do structured output / embeddings). Don't "fix" dry-run to enable them.
 - **fastembed** downloads `BAAI/bge-small-en-v1.5` (~130MB) on first embed; cached after. Knowledge vector search is keyless; **graph extraction needs a provider** (Build graph errors cleanly without one).
 - **Schedules fire only while the server runs** (in-process thread, no catch-up for missed windows) and evaluate cron in server-local time. The webhook token is a capability URL — anyone holding it can start runs; rotate from the Builder Triggers card.
@@ -111,7 +110,7 @@ the full batch lifecycle (launch → grouped Runs view → per-row drill-in) on 
 - **MCP stdio** servers (npx/uvx) can hang on cold start in sandboxes — connection path is correct; remote URL servers are more reliable to test.
 - **Built-in tools** now execute live once configured (Tools → Configure). `pricing.py` figures are **estimates** from a curated table — update `PRICES` as providers reprice; unknown models intentionally show no cost.
 - **Batch/eval + HITL don't mix**: batches and evals run cases unattended, but a `human_input` task still **blocks** every case at its gate (gates block in all modes) — so the run hangs on case 0 until you answer it in the Run console (or Stop the batch/eval). Don't batch/eval a workflow that has human-input tasks. Both drivers are **sequential** by design (one case finishes before the next starts) — a hung case stalls the whole run.
-- **Eval `judge` checks are live-only**: the LLM-as-judge scorer needs a configured provider; in dry-run (or with no default model) a `judge` check fails with detail "needs a live model" rather than erroring. The deterministic checks (`contains`/`not_contains`/`equals`/`regex`) work in any mode. `_judge()` parses a leading `PASS`/`FAIL` from the model reply — **not yet verified against a real provider**.
+- **Eval `judge` checks are live-only**: the LLM-as-judge scorer needs a configured provider; in dry-run (or with no default model) a `judge` check fails with detail "needs a live model" rather than erroring. The deterministic checks (`contains`/`not_contains`/`equals`/`regex`) work in any mode. `_judge()` parses a leading `PASS`/`FAIL` from the model reply — **verified live against MiniMax** (2026-06-11): 3 cases, 3 judge checks, all correctly parsed and scored.
 - **Conditional tasks**: a condition tests the output of the **immediately preceding** task only, and a skipped task's output is **empty** — chained conditionals after a skip see "" (so `contains` fails, `not_contains` passes). crewai fires no task event for a skipped task; the runner's `condition_observer` is what emits `task.skipped` and keeps `task_idx` in sync — don't remove it.
 - **crewai event handlers** run on a thread pool → correlate via closures over the run record, not thread-locals (see `runner.py`).
 - `crewforge.db*` and `secret.key` are gitignored (runtime state; DB re-seeds on boot).
@@ -119,12 +118,12 @@ the full batch lifecycle (launch → grouped Runs view → per-row drill-in) on 
 ---
 
 ## Near-term (small, ready to pick up)
-1. **Live multi-provider verification** *(validation, not a build — needs the user's keys)*. Run a real workflow end-to-end: multi-LLM (each agent on its own provider), MCP + built-in tools, planning/memory, a real **Build graph** (first real `extract.py` exercise), real cost figures. Everything is wired + stub/dry-run-tested; no real provider call has been made this cycle. This unblocks the eval phase below.
+1. **~~Live multi-provider verification~~** ✅ *Done (MiniMax, 2026-06-11)*. Single run + 3-case eval with judge checks all passed. Remaining: MCP + built-in tools live exercise, planning/memory live (needs embedder key), Build graph with a real `extract.py` run.
 2. **Onboarding tour** — a first-run guided walkthrough (build → dry-run → observe → go live). Low risk, high "first 5 minutes" payoff. The empty states already point the way; a tour stitches them.
 3. **Inline MCP marketplace drawer in Builder** — today adding an integration means leaving for the Tools page; a slide-over drawer (reuse `registry.search` + the Tools connect flow) lets you add + attach without losing canvas context.
 
 ## Next larger phases (ordered by product value)
-1. **Eval suite — round 2** (the core shipped; `server/evals.py`). Build on it: (a) **verify LLM-as-judge live** with real keys — `_judge()` parses `PASS/FAIL` from the model, untested against a real provider; (b) eval **history & trend** (score over time per workflow — the records already persist); (c) the human-feedback **`train()`** loop (capture preference data over N iterations) to round out the original train/test item; (d) richer scorers (JSON-path / numeric tolerance / semantic similarity).
+1. **Eval suite — round 2** (the core shipped; `server/evals.py`). (a) ~~verify LLM-as-judge live~~ ✅ *Done (MiniMax, 2026-06-11)*; (b) eval **history & trend** (score over time per workflow — the records already persist); (c) the human-feedback **`train()`** loop (capture preference data over N iterations); (d) richer scorers (JSON-path / numeric tolerance / semantic similarity).
 2. **CrewAI Flows / multi-crew orchestration**. Today a workspace = one crew. Flows are CrewAI's event-driven layer: chain crews, branch on outputs (`@router`), loop, fan-out. A second canvas type ("Flow") that wires crews together is the biggest product expansion — the jump from "a team" to "a pipeline of teams". Large: new spec model, new exporter path, new run semantics.
 3. **Run history & analytics**. The data exists (runs carry status/tokens/cost/trigger; batches and evals roll up cost + pass-rate). Build a reporting layer: cost-over-time, success-rate, token trends, per-workflow/per-batch/per-eval rollups, slowest tasks. Pairs with eval history (#1) for tracking quality over time.
 4. **Versioning & diff**. Workspace version snapshots, visual diff between versions, rollback — then "compare v1 vs v2 on the same eval set" closes the loop with the eval suite.
