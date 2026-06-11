@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import batches as batches_mod
 from . import builtin_tools, mcp, registry, store
+from . import evals as evals_mod
 from . import knowledge as knowledge_mod
 from . import llms as llms_mod
 from . import schedules as schedules_mod
@@ -307,6 +308,48 @@ async def create_batch(req: Request) -> dict[str, Any]:
 def cancel_batch(bid: str) -> dict[str, Any]:
     if not batches_mod.cancel(bid):
         raise HTTPException(404, "no running batch with that id")
+    return {"ok": True}
+
+
+# ---- Evals (run a workflow over a test set, score the outputs) -------------
+@app.get("/api/evals")
+def list_evals(workspace_id: str | None = None) -> dict[str, Any]:
+    items = evals_mod.list_evals(workspace_id)
+    names = {w["id"]: w.get("name", "") for w in store.list_workspaces()}
+    for e in items:
+        e["workspace_name"] = names.get(e["workspace_id"], "(deleted)")
+    return {"evals": items}
+
+
+@app.get("/api/evals/{eid}")
+def get_eval(eid: str) -> dict[str, Any]:
+    ev = evals_mod.get(eid)
+    if not ev:
+        raise HTTPException(404, "eval not found")
+    return ev
+
+
+@app.post("/api/evals/run")
+async def run_eval(req: Request) -> dict[str, Any]:
+    b = await req.json()
+    ws = store.get_workspace(b.get("workspace_id", ""))
+    if not ws:
+        raise HTTPException(404, "workspace not found")
+    if not ws.get("agents") or not ws.get("tasks"):
+        raise HTTPException(400, "workspace needs at least one agent and one task")
+    # Cases come from the request, else fall back to the spec's saved test set.
+    cases = b.get("cases") or ws.get("eval_cases") or []
+    try:
+        return evals_mod.start(runs, ws, cases, dry_run=bool(b.get("dry_run", True)),
+                               name=b.get("name"))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@app.post("/api/evals/{eid}/cancel")
+def cancel_eval(eid: str) -> dict[str, Any]:
+    if not evals_mod.cancel(eid):
+        raise HTTPException(404, "no running eval with that id")
     return {"ok": True}
 
 

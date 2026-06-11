@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Code2, Download, Layers, Play, Plus, Trash2 } from "lucide-react";
+import { Code2, Download, FlaskConical, Layers, Play, Plus, Trash2 } from "lucide-react";
 import {
   api, type AgentSpec, type KnowledgeBase, type LlmConfig, type Manifest, type Persona, type Schedule, type TaskSpec, type ToolInfo, type Workspace,
 } from "../lib/api";
@@ -148,6 +148,14 @@ export function Builder() {
       const batch = await api.startBatch({ workspace_id: ws.id, csv, dry_run: dryRun });
       setBatchOpen(false);
       navigate(`/runs?batch=${batch.id}`);
+    } catch (e) { toast(String(e), "error"); }
+  }
+  async function doEval() {
+    if (!ws) return;
+    if (dirty) await persist();
+    try {
+      const ev = await api.runEval({ workspace_id: ws.id, dry_run: dryRun });
+      navigate(`/runs?eval=${ev.id}`);
     } catch (e) { toast(String(e), "error"); }
   }
 
@@ -305,6 +313,7 @@ export function Builder() {
             </div>
           </Card>
           <TriggersCard ws={ws} mutate={mutate} />
+          <TestsCard ws={ws} mutate={mutate} dryRun={dryRun} onRun={doEval} />
           <Card>
             <CardHeader title="Agents" right={<button onClick={addAgent} className="text-sm text-brand hover:underline">+ Add</button>} />
             <div className="divide-y divide-border">
@@ -695,6 +704,99 @@ function TriggersCard({ ws, mutate }: { ws: Workspace; mutate: (fn: (w: Workspac
             <Button variant="ghost" onClick={() => mutate((w) => { w.hook_token = newToken(); })}>Enable webhook</Button>
           )}
         </div>
+      </div>
+    </Card>
+  );
+}
+
+const CHECK_KINDS: [string, string][] = [
+  ["contains", "contains"],
+  ["not_contains", "does not contain"],
+  ["equals", "equals"],
+  ["regex", "matches regex"],
+  ["judge", "LLM judge"],
+];
+
+// Define a saved test set (cases = inputs + checks) and run it. Each case
+// becomes a tracked run; the output is scored against its checks → pass-rate.
+function TestsCard({ ws, mutate, dryRun, onRun }: {
+  ws: Workspace; mutate: (fn: (w: Workspace) => void) => void; dryRun: boolean; onRun: () => void;
+}) {
+  const cases = ws.eval_cases ?? [];
+  const inputNames = (ws.inputs ?? []).filter((i) => i.name).map((i) => i.name);
+  const usesJudge = cases.some((c) => c.checks?.some((k) => k.type === "judge"));
+
+  return (
+    <Card>
+      <CardHeader title="Tests" sub="Score the workflow's output against a saved test set." />
+      <div className="space-y-3 p-4">
+        <p className="rounded-md bg-elevated2 px-2.5 py-2 text-xs text-muted">
+          Each case runs the workflow and checks its final output. Re-run anytime to catch
+          regressions. <span className="text-ink">LLM judge</span> grades against a plain-language
+          criterion and needs a live model.
+        </p>
+        {cases.map((c, ci) => (
+          <div key={ci} className="space-y-2 rounded-lg border border-border p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-ink">Case {ci + 1}</span>
+              <button onClick={() => mutate((w) => { w.eval_cases!.splice(ci, 1); })}
+                className="text-muted hover:text-danger" aria-label={`Remove case ${ci + 1}`}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {inputNames.length > 0 && (
+              <div className="grid grid-cols-2 gap-2">
+                {inputNames.map((n) => (
+                  <label key={n} className="block text-xs text-muted">
+                    {n}
+                    <Input className="mt-0.5" value={c.inputs?.[n] ?? ""}
+                      onChange={(e) => mutate((w) => {
+                        const cs = w.eval_cases![ci]; cs.inputs = { ...cs.inputs, [n]: e.target.value };
+                      })} />
+                  </label>
+                ))}
+              </div>
+            )}
+            <div className="space-y-1.5">
+              {(c.checks ?? []).map((k, ki) => (
+                <div key={ki} className="space-y-1 rounded-md bg-elevated2/50 p-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Select className="flex-1 py-1 text-xs" value={k.type}
+                      onChange={(e) => mutate((w) => { w.eval_cases![ci].checks[ki].type = e.target.value; })}>
+                      {CHECK_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </Select>
+                    <button onClick={() => mutate((w) => { w.eval_cases![ci].checks.splice(ki, 1); })}
+                      className="text-muted hover:text-danger" aria-label="Remove check">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <Input className="w-full text-xs" value={k.value}
+                    placeholder={k.type === "judge" ? "criterion, e.g. mentions the trade-offs" : "expected text"}
+                    onChange={(e) => mutate((w) => { w.eval_cases![ci].checks[ki].value = e.target.value; })} />
+                </div>
+              ))}
+              <button onClick={() => mutate((w) => {
+                w.eval_cases![ci].checks = [...(w.eval_cases![ci].checks ?? []), { type: "contains", value: "" }];
+              })} className="inline-flex items-center gap-1 text-xs text-brand hover:underline">
+                <Plus className="h-3 w-3" /> Add check
+              </button>
+            </div>
+          </div>
+        ))}
+        <button onClick={() => mutate((w) => {
+          w.eval_cases = [...(w.eval_cases ?? []), { inputs: {}, checks: [{ type: "contains", value: "" }] }];
+        })} className="inline-flex items-center gap-1 text-sm text-brand hover:underline">
+          <Plus className="h-3 w-3" /> Add case
+        </button>
+        {cases.length > 0 && (
+          <div className="flex items-center justify-between border-t border-border pt-3">
+            <span className="text-xs text-muted">
+              {cases.length} case{cases.length === 1 ? "" : "s"} · {dryRun ? "dry-run" : "live"}
+              {usesJudge && dryRun ? " · judge needs live" : ""}
+            </span>
+            <Button variant="ghost" onClick={onRun}><FlaskConical className="h-4 w-4" /> Run tests</Button>
+          </div>
+        )}
       </div>
     </Card>
   );

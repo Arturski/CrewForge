@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, type Batch, type RunEvent, type RunRecord, type Workspace } from "../lib/api";
+import { api, type Batch, type EvalRun, type RunEvent, type RunRecord, type Workspace } from "../lib/api";
 import { Badge, Button, Card, CardHeader, Textarea } from "../components/ui";
 import { EventTimeline } from "../components/EventTimeline";
 import { CrewCanvas, type NodeStatus } from "../components/CrewCanvas";
@@ -13,6 +13,7 @@ export function Runs() {
   const [params, setParams] = useSearchParams();
   const runId = params.get("run");
   const batchId = params.get("batch");
+  const evalId = params.get("eval");
   // Select a run while preserving the batch context in the URL.
   const selectRun = useCallback((id: string) => {
     setParams((p) => { p.set("run", id); return p; }, { replace: true });
@@ -94,6 +95,7 @@ export function Runs() {
       </div>
 
       {batchId && <BatchPanel batchId={batchId} currentRun={runId} onSelect={selectRun} onSettled={refreshRecent} />}
+      {evalId && <EvalPanel evalId={evalId} currentRun={runId} onSelect={selectRun} onSettled={refreshRecent} />}
 
       {workspace && (
         <Card className="overflow-hidden">
@@ -307,6 +309,99 @@ function BatchPanel({ batchId, currentRun, onSelect, onSettled }: {
           </button>
         ))}
         {(batch.runs ?? []).length === 0 && <div className="text-sm text-muted">Queuing runs…</div>}
+      </div>
+    </Card>
+  );
+}
+
+// An eval ran the workflow over a test set and scored each output; this shows
+// the pass-rate and every case's check results. Polls while still running.
+function EvalPanel({ evalId, currentRun, onSelect, onSettled }: {
+  evalId: string; currentRun: string | null;
+  onSelect: (id: string) => void; onSettled: () => void;
+}) {
+  const toast = useToast();
+  const [ev, setEv] = useState<EvalRun | null>(null);
+  const settledRef = useRef(false);
+
+  useEffect(() => {
+    settledRef.current = false;
+    let live = true;
+    const load = () => api.evalRun(evalId).then((e) => {
+      if (!live) return;
+      setEv(e);
+      if (e.status !== "running" && !settledRef.current) { settledRef.current = true; onSettled(); }
+    }).catch(() => {});
+    load();
+    const t = window.setInterval(() => {
+      setEv((prev) => { if (prev && prev.status !== "running") return prev; load(); return prev; });
+    }, 1500);
+    return () => { live = false; window.clearInterval(t); };
+  }, [evalId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!ev) return null;
+  const pct = ev.total ? Math.round((ev.finished / ev.total) * 100) : 0;
+  const scorePct = ev.score == null ? null : Math.round(ev.score * 100);
+  return (
+    <Card>
+      <CardHeader
+        title={ev.name}
+        sub={`eval ${ev.id} · ${ev.finished}/${ev.total} run · ${ev.passed} passed`}
+        right={
+          <span className="flex items-center gap-2">
+            {scorePct != null && (
+              <Badge tone={scorePct === 100 ? "ok" : scorePct >= 50 ? "warn" : "danger"}>{scorePct}% pass</Badge>
+            )}
+            {ev.cost ? <Badge tone="warn">${ev.cost.toFixed(ev.cost < 0.1 ? 4 : 2)} est.</Badge> : null}
+            <Badge tone={ev.status === "running" ? "running" : ev.status === "done" ? "ok" : "warn"}>
+              {ev.status}{ev.dry_run ? " · dry-run" : ""}
+            </Badge>
+            {ev.status === "running" && (
+              <Button variant="ghost" onClick={async () => {
+                try { await api.cancelEval(ev.id); toast("Stopping eval…", "ok"); }
+                catch (e) { toast(String(e), "error"); }
+              }}>■ Stop</Button>
+            )}
+          </span>
+        }
+      />
+      <div className="px-4 pt-3">
+        <div className="h-1.5 overflow-hidden rounded-full bg-elevated2"
+          role="progressbar" aria-valuenow={ev.finished} aria-valuemin={0} aria-valuemax={ev.total}
+          aria-label={`${ev.finished} of ${ev.total} cases run`}>
+          <div className="h-full bg-brand transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+      <div className="divide-y divide-border p-2">
+        {ev.cases.map((c) => {
+          const inputPreview = Object.entries(c.inputs).map(([k, v]) => `${k}=${v}`).join("  ") || "(no inputs)";
+          return (
+            <button key={c.index} onClick={() => c.run_id && onSelect(c.run_id)} disabled={!c.run_id}
+              className={`flex w-full flex-col gap-1 rounded-lg px-2 py-2 text-left transition hover:bg-elevated2 disabled:cursor-default ${
+                c.run_id === currentRun ? "bg-brand-soft" : ""
+              }`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-xs">
+                  <span className="text-muted">#{c.index + 1}</span>{" "}
+                  <span className="text-ink">{inputPreview}</span>
+                </span>
+                {c.passed == null
+                  ? <Badge tone="running">{c.status ?? "queued"}</Badge>
+                  : <Badge tone={c.passed ? "ok" : "danger"}>{c.passed ? "pass" : "fail"}</Badge>}
+              </div>
+              {c.checks_run.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {c.checks_run.map((k, i) => (
+                    <span key={i} title={k.detail || undefined}
+                      className={`rounded px-1.5 py-0.5 text-[10px] ${k.ok ? "bg-ok/15 text-ok" : "bg-danger/15 text-danger"}`}>
+                      {k.ok ? "✓" : "✗"} {k.type}{k.value ? ` "${k.value.slice(0, 24)}"` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
     </Card>
   );

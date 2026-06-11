@@ -49,6 +49,7 @@ export interface Workspace {
   memory?: boolean; // crew memory (live runs)
   knowledge?: string[]; // workflow-level knowledge base ids
   hook_token?: string; // webhook trigger token (POST /api/hooks/{id}/{token})
+  eval_cases?: { inputs: Record<string, string>; checks: { type: string; value: string; case_sensitive?: boolean }[] }[]; // saved test set
   llm_id?: string; // configured LLM connection for the whole crew; blank = default
   manager_agent_id?: string; // hierarchical only: agent that manages the crew
 }
@@ -71,6 +72,27 @@ export interface RunRecord {
   workspace_id?: string;
   inputs?: Record<string, string>; // run-time variables this run started with
   hitl?: { output: string; since: string } | null; // set while blocked at a human gate
+}
+
+// One assertion checked against a case's final output.
+export interface EvalCheck {
+  type: "contains" | "not_contains" | "regex" | "equals" | "judge";
+  value: string; case_sensitive?: boolean;
+}
+// A test case: run inputs + the checks its output must pass.
+export interface EvalCase { inputs: Record<string, string>; checks: EvalCheck[] }
+// One scored case after the eval ran.
+export interface EvalCaseResult {
+  index: number; inputs: Record<string, string>; checks: EvalCheck[];
+  run_id: string | null; status: RunRecord["status"] | null; passed: boolean | null;
+  checks_run: { type: string; value: string; ok: boolean; detail: string }[];
+}
+export interface EvalRun {
+  id: string; workspace_id: string; workspace_name?: string; name: string;
+  dry_run: boolean; total: number; status: "running" | "done" | "cancelled";
+  finished: number; passed: number; failed: number; score: number | null;
+  cost: number | null; tokens: number; created_at: string; finished_at: string | null;
+  cases: EvalCaseResult[];
 }
 
 // A batch = one workflow run over many input rows; each row is its own RunRecord.
@@ -242,6 +264,13 @@ export const api = {
   startBatch: (body: { workspace_id: string; csv?: string; rows?: Record<string, string>[]; dry_run?: boolean; name?: string }) =>
     req<Batch>("/api/batches", json("POST", body)),
   cancelBatch: (id: string) => req<{ ok: boolean }>(`/api/batches/${id}/cancel`, { method: "POST" }),
+
+  evals: (workspaceId?: string) =>
+    req<{ evals: EvalRun[] }>(`/api/evals${workspaceId ? `?workspace_id=${workspaceId}` : ""}`),
+  evalRun: (id: string) => req<EvalRun>(`/api/evals/${id}`),
+  runEval: (body: { workspace_id: string; cases?: EvalCase[]; dry_run?: boolean; name?: string }) =>
+    req<EvalRun>("/api/evals/run", json("POST", body)),
+  cancelEval: (id: string) => req<{ ok: boolean }>(`/api/evals/${id}/cancel`, { method: "POST" }),
   runs: () => req<{ runs: RunRecord[] }>("/api/runs"),
   run: (id: string) => req<RunRecord>(`/api/runs/${id}`),
   cancelRun: (id: string) => req<{ ok: boolean }>(`/api/runs/${id}/cancel`, { method: "POST" }),

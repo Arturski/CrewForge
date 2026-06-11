@@ -62,6 +62,7 @@ def init() -> None:
                 );
                 CREATE TABLE IF NOT EXISTS schedules (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT);
                 CREATE TABLE IF NOT EXISTS batches (id TEXT PRIMARY KEY, workspace_id TEXT, created_at TEXT, data TEXT);
+                CREATE TABLE IF NOT EXISTS evals (id TEXT PRIMARY KEY, workspace_id TEXT, created_at TEXT, data TEXT);
                 """
             )
         _seed_if_empty()
@@ -143,6 +144,37 @@ def save_batch(b: dict[str, Any]) -> dict[str, Any]:
 def delete_batch(bid: str) -> None:
     with _conn() as c:
         c.execute("DELETE FROM batches WHERE id=?", (bid,))
+
+
+# -- evals -------------------------------------------------------------------
+def list_evals(workspace_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    with _conn() as c:
+        if workspace_id:
+            rows = c.execute("SELECT data FROM evals WHERE workspace_id=? "
+                             "ORDER BY created_at DESC LIMIT ?", (workspace_id, limit)).fetchall()
+        else:
+            rows = c.execute("SELECT data FROM evals ORDER BY created_at DESC LIMIT ?",
+                             (limit,)).fetchall()
+    return [json.loads(r["data"]) for r in rows]
+
+
+def get_eval(eid: str) -> dict[str, Any] | None:
+    with _conn() as c:
+        row = c.execute("SELECT data FROM evals WHERE id=?", (eid,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def save_eval(e: dict[str, Any]) -> dict[str, Any]:
+    with _conn() as c:
+        c.execute("INSERT INTO evals (id, workspace_id, created_at, data) VALUES (?,?,?,?) "
+                  "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                  (e["id"], e.get("workspace_id", ""), e.get("created_at", ""), json.dumps(e)))
+    return e
+
+
+def delete_eval(eid: str) -> None:
+    with _conn() as c:
+        c.execute("DELETE FROM evals WHERE id=?", (eid,))
 
 
 # -- personas ----------------------------------------------------------------
