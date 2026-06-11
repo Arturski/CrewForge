@@ -64,6 +64,7 @@ export function Runs() {
       else if (e.kind === "agent.error" && aid) map[`agent:${aid}`] = "error";
       else if (e.kind === "task.started" && e.task_index != null) map[`task:${e.task_index}`] = "running";
       else if (e.kind === "task.completed" && e.task_index != null) map[`task:${e.task_index}`] = "done";
+      else if (e.kind === "task.skipped" && e.task_index != null) map[`task:${e.task_index}`] = "skipped";
     }
     return map;
   }, [events, workspace]);

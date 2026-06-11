@@ -5,10 +5,12 @@ Also provides FakeLLM: a zero-cost, no-network mock model used for CrewForge's
 """
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Any, Callable
 
 from crewai import Agent, Crew, Process, Task
 from crewai.llms.base_llm import BaseLLM
+from crewai.tasks.conditional_task import ConditionalTask
 from pydantic import create_model
 
 # JSON-schema-ish field type -> python type for structured task outputs.
@@ -59,6 +61,38 @@ def _coerce(value: Any) -> Any:
     return value
 
 
+# No-code run conditions: the task runs only if the PREVIOUS task's output
+# passes the check. Evaluated by crewai's ConditionalTask (skip = empty output).
+CONDITION_CHECKS = {"contains", "not_contains", "regex"}
+
+
+def make_condition(cond: dict[str, Any],
+                   task_index: int = -1,
+                   observer: Callable[[int, bool], None] | None = None):
+    """Compile a spec condition into a ConditionalTask predicate.
+
+    `observer(task_index, will_run)` fires on every evaluation so the runner
+    can emit a task.skipped event and keep its task-index correlation in sync
+    (crewai fires no task event at all for a skipped conditional task).
+    """
+    check = cond.get("check")
+    value = str(cond.get("value") or "")
+    case_sensitive = bool(cond.get("case_sensitive"))
+
+    def predicate(output: Any) -> bool:
+        text = str(getattr(output, "raw", output) or "")
+        if check == "regex":
+            ok = re.search(value, text, 0 if case_sensitive else re.IGNORECASE) is not None
+        else:
+            t, v = (text, value) if case_sensitive else (text.lower(), value.lower())
+            ok = (v in t) if check == "contains" else (v not in t)
+        if observer is not None:
+            observer(task_index, ok)
+        return ok
+
+    return predicate
+
+
 def _output_model(task_name: str, schema: list[dict[str, Any]]):
     """Build a Pydantic model from a simple [{name, type}] schema for structured output."""
     fields = {
@@ -73,7 +107,8 @@ def _output_model(task_name: str, schema: list[dict[str, Any]]):
 
 def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None,
                agent_tools: dict[str, list] | None = None,
-               agent_llms: dict[str, Any] | None = None) -> Crew:
+               agent_llms: dict[str, Any] | None = None,
+               condition_observer: Callable[[int, bool], None] | None = None) -> Crew:
     """Build a CrewAI Crew from a CrewForge spec.
 
     - Curated + advanced scalar agent fields are passed through (AGENT_SCALAR_FIELDS).
@@ -101,7 +136,7 @@ def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None,
         agents[a["id"]] = Agent(**kwargs)
 
     tasks: list[Task] = []
-    for t in spec.get("tasks", []):
+    for i, t in enumerate(spec.get("tasks", [])):
         description = t["description"]
         rules = (t.get("rules") or "").strip()
         if rules:
@@ -128,7 +163,19 @@ def build_crew(spec: dict[str, Any], llm: BaseLLM | None = None, hitl_gate=None,
             model = _output_model(t.get("name", ""), t["output_schema"])
             if model is not None:
                 tkwargs["output_pydantic"] = model
-        tasks.append(Task(**tkwargs))
+        cond = t.get("condition") or {}
+        if cond.get("check") in CONDITION_CHECKS:
+            name = t.get("name") or f"task {i + 1}"
+            if i == 0:
+                raise ValueError(
+                    "The first task cannot have a run condition — there is no previous output to test.")
+            if t.get("async_execution"):
+                raise ValueError(
+                    f"Task '{name}' cannot be both conditional and async (crewai limitation).")
+            tkwargs["condition"] = make_condition(cond, i, condition_observer)
+            tasks.append(ConditionalTask(**tkwargs))
+        else:
+            tasks.append(Task(**tkwargs))
 
     process = (
         Process.hierarchical

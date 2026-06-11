@@ -309,7 +309,7 @@ export function Builder() {
               {ws.tasks.map((t, i) => (
                 <Row key={i} active={sel?.kind === "task" && sel.idx === i}
                   dot="var(--color-node-task)" label={t.name || t.description.slice(0, 28) || "Untitled task"}
-                  badge={t.human_input ? "HITL" : undefined}
+                  badge={t.human_input ? "HITL" : t.condition?.check ? "IF" : undefined}
                   onClick={() => setSel({ kind: "task", idx: i })}
                   onDelete={() => { mutate((w) => removeTask(w, i)); setSel(null); }} />
               ))}
@@ -420,6 +420,32 @@ export function Builder() {
                           <span className="truncate">{t2.name || t2.description?.slice(0, 40) || `task ${ti + 1}`}</span>
                         </label>
                       ))}
+                    </div>
+                  </div>
+                )}
+                {sel!.idx > 0 && (
+                  <div>
+                    <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
+                      Run condition<Tooltip text="Run this step only if the previous task's output passes the check — otherwise it is skipped (empty output). Note: if the previous task was itself skipped, its output is empty. Not compatible with 'Run in parallel'." />
+                    </div>
+                    <div className="flex gap-2">
+                      <Select className="w-64 shrink-0" value={task.condition?.check ?? ""}
+                        onChange={(e) => mutate((w) => {
+                          const tt = w.tasks[sel!.idx];
+                          const check = e.target.value as "" | "contains" | "not_contains" | "regex";
+                          if (!check) delete tt.condition;
+                          else tt.condition = { check, value: tt.condition?.value ?? "" };
+                        })}>
+                        <option value="">Always run</option>
+                        <option value="contains">If previous output contains…</option>
+                        <option value="not_contains">If previous output does NOT contain…</option>
+                        <option value="regex">If previous output matches regex…</option>
+                      </Select>
+                      {task.condition?.check && (
+                        <Input className="flex-1" placeholder={task.condition.check === "regex" ? "pattern, e.g. score:\\s*[89]" : "text to look for"}
+                          value={task.condition.value}
+                          onChange={(e) => mutate((w) => { w.tasks[sel!.idx].condition!.value = e.target.value; })} />
+                      )}
                     </div>
                   </div>
                 )}

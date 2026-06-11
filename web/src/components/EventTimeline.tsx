@@ -8,6 +8,7 @@ const KIND_TONE: Record<string, string> = {
   "crew.kickoff.completed": "var(--color-ok)",
   "task.started": "var(--color-node-task)",
   "task.completed": "var(--color-node-task)",
+  "task.skipped": "var(--color-muted)",
   "agent.execution.started": "var(--color-node-agent)",
   "agent.execution.completed": "var(--color-node-agent)",
   "agent.error": "var(--color-danger)",

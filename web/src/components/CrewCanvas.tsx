@@ -4,26 +4,27 @@ import {
   type Node, type Edge, type NodeProps, type NodeChange, type Connection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Bot, ListChecks, Plus, Trash2, Pause } from "lucide-react";
+import { Bot, GitFork, ListChecks, Plus, Trash2, Pause } from "lucide-react";
 import type { Workspace } from "../lib/api";
 
 // The canvas IS the editor (add/select/drag/delete) and the live run view
 // (nodes glow by run status). Pass readOnly to use it purely for observation.
 
 export type Sel = { kind: "agent" | "task"; idx: number } | null;
-export type NodeStatus = "running" | "done" | "error";
+export type NodeStatus = "running" | "done" | "error" | "skipped";
 
 type BaseData = {
   label: string; selected: boolean; status?: NodeStatus; readOnly?: boolean;
   onSelect: () => void; onDelete: () => void;
 };
-type TaskData = BaseData & { hitl: boolean };
+type TaskData = BaseData & { hitl: boolean; conditional: boolean };
 
 // Literal class strings (Tailwind JIT can't see dynamically-built names).
 const STATUS_RING: Record<NodeStatus, string> = {
   running: "border-running ring-2 ring-running/50 animate-pulse",
   done: "border-ok ring-2 ring-ok/40",
   error: "border-danger ring-2 ring-danger/50",
+  skipped: "border-border opacity-50",
 };
 const AGENT_SKIN = {
   bg: "bg-elevated2", handle: "!h-1.5 !w-1.5 !border-0 !bg-node-agent",
@@ -73,8 +74,9 @@ function TaskNode({ data }: NodeProps<Node<TaskData>>) {
         <ListChecks className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--color-node-task)" }} />
         <span className="truncate font-medium text-ink">{data.label}</span>
         {data.hitl && <Pause className="h-3 w-3 shrink-0" style={{ color: "var(--color-warn)" }} />}
+        {data.conditional && <GitFork className="h-3 w-3 shrink-0" style={{ color: "var(--color-running)" }} />}
       </div>
-      <div className="mt-0.5 text-[10px] text-muted">task</div>
+      <div className="mt-0.5 text-[10px] text-muted">{data.status === "skipped" ? "task · skipped" : data.conditional ? "task · conditional" : "task"}</div>
     </NodeShell>
   );
 }
@@ -126,7 +128,7 @@ export function CrewCanvas({
         position: layout[id] ?? { x: i * 230, y: 190 },
         data: {
           label: t.name || t.description?.slice(0, 24) || `task ${i + 1}`,
-          hitl: !!t.human_input, status: status[id], readOnly,
+          hitl: !!t.human_input, conditional: !!t.condition?.check, status: status[id], readOnly,
           selected: sel?.kind === "task" && sel.idx === i,
           onSelect: () => onSelect({ kind: "task", idx: i }),
           onDelete: () => onDelete({ kind: "task", idx: i }),

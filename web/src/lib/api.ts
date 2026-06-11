@@ -27,10 +27,16 @@ export interface AgentSpec {
   // agents may carry any additional crewai field set via the advanced panel
   [key: string]: unknown;
 }
+export interface TaskCondition {
+  check: "contains" | "not_contains" | "regex";
+  value: string;
+  case_sensitive?: boolean;
+}
 export interface TaskSpec {
   agent: string; description: string; expected_output: string;
   human_input?: boolean; name?: string; rules?: string;
   context?: number[]; // indices of earlier tasks whose output feeds this one
+  condition?: TaskCondition; // run only if the previous task's output passes
   [key: string]: unknown;
 }
 export interface Workspace {

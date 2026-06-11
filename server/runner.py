@@ -209,11 +209,20 @@ class RunManager:
                 if wf_kbs or any(a.get("knowledge") for a in spec.get("agents", [])):
                     emit("knowledge.attached", count=sum(len(v) for v in (agent_tools or {}).values()))
 
-            crew = build_crew(spec, llm=llm, hitl_gate=hitl_gate, agent_tools=agent_tools,
-                              agent_llms=agent_llms)
-
             tasks = spec.get("tasks", [])
             st = {"task_idx": -1, "starts": {}, "task_tokens": {}}
+
+            def on_condition(i: int, will_run: bool) -> None:
+                # crewai fires NO task event for a skipped conditional task, so
+                # we surface the skip ourselves and advance the index counter
+                # (task correlation counts TaskStartedEvents otherwise).
+                if not will_run:
+                    st["task_idx"] = i
+                    name = (tasks[i].get("name") if i < len(tasks) else None) or f"task {i + 1}"
+                    emit("task.skipped", task_index=i, task=name)
+
+            crew = build_crew(spec, llm=llm, hitl_gate=hitl_gate, agent_tools=agent_tools,
+                              agent_llms=agent_llms, condition_observer=on_condition)
 
             def reg(event_cls, fn):
                 crewai_event_bus.register_handler(event_cls, fn)
