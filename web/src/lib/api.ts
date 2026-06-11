@@ -107,9 +107,18 @@ export interface KnowledgeBase {
 }
 export interface SearchHit { text: string; score: number; source: string }
 
+export interface ToolParam { name: string; type: string; default?: unknown; required: boolean }
+export interface ToolEnvVar { name: string; required: boolean }
 export interface ToolInfo {
   name: string; description: string;
   kind?: "builtin" | "mcp"; server?: string; server_id?: string; risk?: string;
+  configured?: boolean; missing_env?: string[];
+  env_vars?: ToolEnvVar[]; params?: ToolParam[];
+}
+export interface ToolConfig {
+  params: ToolParam[]; env_vars: ToolEnvVar[];
+  config: { args: Record<string, unknown>; env: Record<string, string> };
+  configured: boolean; missing_env: string[];
 }
 
 export interface McpTool { name: string; description: string }
@@ -153,6 +162,10 @@ export const api = {
   health: () => req<{ status: string; crewai_version: string; version: string }>("/api/health"),
   manifest: () => req<Manifest>("/api/manifest"),
   tools: () => req<{ tools: ToolInfo[] }>("/api/tools"),
+  builtinTool: (name: string) => req<ToolConfig>(`/api/tools/builtin/${name}`),
+  setBuiltinToolConfig: (name: string, body: { args: Record<string, unknown>; env: Record<string, string> }) =>
+    req<ToolConfig>(`/api/tools/builtin/${name}/config`, json("PUT", body)),
+  deleteBuiltinToolConfig: (name: string) => req<{ ok: boolean }>(`/api/tools/builtin/${name}/config`, { method: "DELETE" }),
 
   workspaces: () => req<{ workspaces: WorkspaceSummary[] }>("/api/workspaces"),
   workspace: (id: string) => req<Workspace>(`/api/workspaces/${id}`),

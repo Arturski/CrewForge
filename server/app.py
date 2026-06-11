@@ -14,9 +14,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import builtin_tools, mcp, registry, store
 from . import knowledge as knowledge_mod
 from . import llms as llms_mod
-from . import mcp, registry, store
 from . import templates as templates_mod
 from .compiler.exporter import export_files, export_zip
 from .compiler.manifest import build_manifest
@@ -49,7 +49,37 @@ def manifest() -> dict[str, Any]:
 
 @app.get("/api/tools")
 def tools() -> dict[str, Any]:
-    return {"tools": tool_catalog() + mcp.mcp_tool_catalog()}
+    out = []
+    for t in tool_catalog():
+        st = builtin_tools.status(t["name"])
+        desc = builtin_tools.describe(t["name"]) or {}
+        out.append({**t, **st, "env_vars": desc.get("env_vars") or [],
+                    "params": desc.get("params") or []})
+    return {"tools": out + mcp.mcp_tool_catalog()}
+
+
+@app.get("/api/tools/builtin/{name}")
+def get_builtin_tool(name: str) -> dict[str, Any]:
+    desc = builtin_tools.describe(name)
+    if desc is None:
+        raise HTTPException(404, "tool not found")
+    return {**desc, "config": builtin_tools.get_config(name),
+            **builtin_tools.status(name)}
+
+
+@app.put("/api/tools/builtin/{name}/config")
+async def set_builtin_tool_config(name: str, req: Request) -> dict[str, Any]:
+    if builtin_tools.describe(name) is None:
+        raise HTTPException(404, "tool not found")
+    b = await req.json() if await req.body() else {}
+    builtin_tools.set_config(name, b.get("args"), b.get("env"))
+    return {"config": builtin_tools.get_config(name), **builtin_tools.status(name)}
+
+
+@app.delete("/api/tools/builtin/{name}/config")
+def delete_builtin_tool_config(name: str) -> dict[str, Any]:
+    builtin_tools.delete_config(name)
+    return {"ok": True}
 
 
 @app.get("/api/personas")

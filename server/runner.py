@@ -28,7 +28,7 @@ from crewai.events.types.tool_usage_events import (
     ToolUsageStartedEvent,
 )
 
-from . import llms, mcp, store
+from . import builtin_tools, llms, mcp, store
 from .compiler.adapter import FakeLLM, build_crew
 
 
@@ -178,6 +178,24 @@ class RunManager:
                             emit("mcp.tools.attached", count=len(tools))
                     except Exception as e:  # noqa: BLE001
                         emit("mcp.error", error=str(e)[:200])
+                    # Built-in crewai_tools referenced by name: instantiate the
+                    # configured ones (env keys decrypted from the vault); a
+                    # tool with missing keys is reported, not fatal.
+                    from .compiler.tools import tool_catalog
+                    builtin_wanted = [n for n in skill_names
+                                      if n in {t["name"] for t in tool_catalog()}]
+                    if builtin_wanted:
+                        btools, berrors = builtin_tools.instantiate(builtin_wanted)
+                        for n, err in sorted(berrors.items()):
+                            emit("tool.config.error", tool=n, error=err)
+                        if btools:
+                            agent_tools = agent_tools or {}
+                            for a in spec.get("agents", []):
+                                names = list(a.get("tools") or []) + workflow_skills
+                                ats = [btools[n] for n in dict.fromkeys(names) if n in btools]
+                                if ats:
+                                    agent_tools[a["id"]] = (agent_tools.get(a["id"]) or []) + ats
+                            emit("builtin.tools.attached", count=len(btools))
 
             # Per-agent LLM overrides: each agent can pick a configured connection.
             agent_llms: dict[str, Any] = {}

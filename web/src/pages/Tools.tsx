@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  api, type McpInput, type McpServer, type RegistryServer, type ToolInfo,
+  api, type McpInput, type McpServer, type RegistryServer, type ToolConfig, type ToolInfo,
 } from "../lib/api";
 import {
   Badge, Button, Card, CardHeader, Input, LabeledField, Modal, Select, Tooltip,
@@ -86,9 +86,11 @@ function ToolCatalog() {
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [configuring, setConfiguring] = useState<string | null>(null);
   const [, setParams] = useSearchParams();
 
-  useEffect(() => { api.tools().then((d) => setTools(d.tools)).catch(() => {}); }, []);
+  const load = () => api.tools().then((d) => setTools(d.tools)).catch(() => {});
+  useEffect(() => { load(); }, []);
 
   const builtin = tools.filter((t) => t.kind !== "mcp");
   const mcp = tools.filter((t) => t.kind === "mcp");
@@ -124,14 +126,113 @@ function ToolCatalog() {
           <Card key={`${t.kind}:${t.server ?? ""}:${t.name}`} className="p-4">
             <div className="flex items-center justify-between gap-2">
               <div className="truncate font-medium text-ink">{t.name}</div>
-              {t.kind === "mcp" ? <Badge tone="brand">{t.server}</Badge> : <Badge tone="ok">built-in</Badge>}
+              {t.kind === "mcp" ? <Badge tone="brand">{t.server}</Badge>
+                : t.missing_env?.length ? <Badge tone="warn">needs key</Badge>
+                : t.configured ? <Badge tone="ok">ready</Badge>
+                : <Badge tone="ok">built-in</Badge>}
             </div>
             <p className="mt-1 line-clamp-2 text-xs text-muted">{t.description}</p>
+            {t.kind !== "mcp" && (t.env_vars?.length || t.params?.length) ? (
+              <button onClick={() => setConfiguring(t.name)} className="mt-2 text-xs text-brand hover:underline">
+                {t.configured ? "Edit configuration" : "Configure"}
+                {t.missing_env?.length ? ` (${t.missing_env.join(", ")})` : ""}
+              </button>
+            ) : null}
           </Card>
         ))}
         {!filtered.length && <div className="text-sm text-muted">No tools match “{q}”.</div>}
       </div>
+
+      {configuring && (
+        <ToolConfigModal name={configuring} onClose={() => setConfiguring(null)}
+          onSaved={() => { setConfiguring(null); load(); }} />
+      )}
     </div>
+  );
+}
+
+function ToolConfigModal({ name, onClose, onSaved }: {
+  name: string; onClose: () => void; onSaved: () => void;
+}) {
+  const toast = useToast();
+  const [cfg, setCfg] = useState<ToolConfig | null>(null);
+  const [args, setArgs] = useState<Record<string, string>>({});
+  const [env, setEnv] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    api.builtinTool(name).then((c) => {
+      setCfg(c);
+      setArgs(Object.fromEntries(Object.entries(c.config.args).map(([k, v]) => [k, String(v)])));
+      setEnv(c.config.env);
+    }).catch((e) => { toast(String(e), "error"); onClose(); });
+  }, [name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function save() {
+    if (!cfg) return;
+    const typed: Record<string, unknown> = {};
+    for (const p of cfg.params) {
+      const raw = (args[p.name] ?? "").trim();
+      if (!raw) continue;
+      typed[p.name] = p.type === "integer" ? parseInt(raw, 10)
+        : p.type === "number" ? parseFloat(raw)
+        : p.type === "boolean" ? raw === "true"
+        : raw;
+    }
+    try { await api.setBuiltinToolConfig(name, { args: typed, env }); toast("Saved", "ok"); onSaved(); }
+    catch (e) { toast(String(e), "error"); }
+  }
+  async function clear() {
+    try { await api.deleteBuiltinToolConfig(name); toast("Configuration removed", "ok"); onSaved(); }
+    catch (e) { toast(String(e), "error"); }
+  }
+
+  return (
+    <Modal title={`Configure ${name}`} onClose={onClose}>
+      {!cfg ? <div className="py-8 text-center text-sm text-muted">Loading…</div> : (
+        <div className="space-y-4">
+          {cfg.env_vars.length > 0 && (
+            <div>
+              <div className="mb-2 text-xs font-medium text-muted">API keys (encrypted at rest)</div>
+              {cfg.env_vars.map((e) => (
+                <LabeledField key={e.name} label={`${e.name}${e.required ? "" : " (optional)"}`}>
+                  <Input type="password" placeholder={env[e.name] === "•••" ? "saved — leave to keep" : "paste key"}
+                    value={env[e.name] ?? ""} onChange={(ev) => setEnv({ ...env, [e.name]: ev.target.value })} />
+                </LabeledField>
+              ))}
+            </div>
+          )}
+          {cfg.params.length > 0 && (
+            <div>
+              <div className="mb-2 text-xs font-medium text-muted">Options (blank = tool default)</div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {cfg.params.map((p) => (
+                  <LabeledField key={p.name} label={p.name}>
+                    {p.type === "boolean" ? (
+                      <Select value={args[p.name] ?? ""} onChange={(e) => setArgs({ ...args, [p.name]: e.target.value })}>
+                        <option value="">default{p.default != null ? ` (${String(p.default)})` : ""}</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                      </Select>
+                    ) : (
+                      <Input type={p.type === "string" ? "text" : "number"}
+                        placeholder={p.default != null ? String(p.default) : p.type}
+                        value={args[p.name] ?? ""} onChange={(e) => setArgs({ ...args, [p.name]: e.target.value })} />
+                    )}
+                  </LabeledField>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <Button variant="ghost" onClick={clear}>Clear configuration</Button>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button onClick={save}>Save</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 
