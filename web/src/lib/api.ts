@@ -66,10 +66,21 @@ export interface RunRecord {
   dry_run: boolean; spec_name: string; started_at: string; finished_at: string | null;
   result: string | null; error: string | null; event_count: number; tokens?: number;
   cost?: number | null; // estimated USD from tokens × curated pricing (live runs)
-  trigger?: string; // manual | webhook | schedule:<id>
+  trigger?: string; // manual | webhook | schedule:<id> | batch:<id>
+  batch_id?: string | null; batch_index?: number | null; // set for a batch row
   workspace_id?: string;
   inputs?: Record<string, string>; // run-time variables this run started with
   hitl?: { output: string; since: string } | null; // set while blocked at a human gate
+}
+
+// A batch = one workflow run over many input rows; each row is its own RunRecord.
+export interface Batch {
+  id: string; workspace_id: string; workspace_name?: string; name: string;
+  dry_run: boolean; total: number; status: "running" | "done" | "cancelled";
+  run_ids: string[]; finished: number; succeeded: number; failed: number;
+  cancelled_runs: number; cost: number | null; tokens: number;
+  created_at: string; finished_at: string | null;
+  runs?: RunRecord[]; // only on the single-batch fetch
 }
 
 export interface LlmSettings {
@@ -233,6 +244,13 @@ export const api = {
 
   startRun: (workspace_id: string, dry_run = true, inputs: Record<string, string> = {}) =>
     req<{ run_id: string }>("/api/runs", json("POST", { workspace_id, dry_run, inputs })),
+
+  batches: (workspaceId?: string) =>
+    req<{ batches: Batch[] }>(`/api/batches${workspaceId ? `?workspace_id=${workspaceId}` : ""}`),
+  batch: (id: string) => req<Batch>(`/api/batches/${id}`),
+  startBatch: (body: { workspace_id: string; csv?: string; rows?: Record<string, string>[]; dry_run?: boolean; name?: string }) =>
+    req<Batch>("/api/batches", json("POST", body)),
+  cancelBatch: (id: string) => req<{ ok: boolean }>(`/api/batches/${id}/cancel`, { method: "POST" }),
   runs: () => req<{ runs: RunRecord[] }>("/api/runs"),
   run: (id: string) => req<RunRecord>(`/api/runs/${id}`),
   cancelRun: (id: string) => req<{ ok: boolean }>(`/api/runs/${id}/cancel`, { method: "POST" }),

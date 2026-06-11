@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, type RunEvent, type RunRecord, type Workspace } from "../lib/api";
+import { api, type Batch, type RunEvent, type RunRecord, type Workspace } from "../lib/api";
 import { Badge, Button, Card, CardHeader, Textarea } from "../components/ui";
 import { EventTimeline } from "../components/EventTimeline";
 import { CrewCanvas, type NodeStatus } from "../components/CrewCanvas";
@@ -12,6 +12,11 @@ export function Runs() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const runId = params.get("run");
+  const batchId = params.get("batch");
+  // Select a run while preserving the batch context in the URL.
+  const selectRun = useCallback((id: string) => {
+    setParams((p) => { p.set("run", id); return p; }, { replace: true });
+  }, [setParams]);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [record, setRecord] = useState<RunRecord | null>(null);
   const [recent, setRecent] = useState<RunRecord[]>([]);
@@ -87,6 +92,8 @@ export function Runs() {
         </div>
         <Button onClick={startDemo}>▶ Run a workflow</Button>
       </div>
+
+      {batchId && <BatchPanel batchId={batchId} currentRun={runId} onSelect={selectRun} />}
 
       {workspace && (
         <Card className="overflow-hidden">
@@ -225,5 +232,71 @@ function HitlPanel({ runId, output, onDecided }: {
         )}
       </div>
     </div>
+  );
+}
+
+// A batch ran one workflow over many input rows; this shows the group's live
+// progress and lets you open any row. Polls while the batch is still running.
+function BatchPanel({ batchId, currentRun, onSelect }: {
+  batchId: string; currentRun: string | null; onSelect: (id: string) => void;
+}) {
+  const toast = useToast();
+  const [batch, setBatch] = useState<Batch | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const load = () => api.batch(batchId).then((b) => { if (live) setBatch(b); }).catch(() => {});
+    load();
+    const t = window.setInterval(() => {
+      setBatch((prev) => { if (prev && prev.status !== "running") return prev; load(); return prev; });
+    }, 1500);
+    return () => { live = false; window.clearInterval(t); };
+  }, [batchId]);
+
+  if (!batch) return null;
+  const pct = batch.total ? Math.round((batch.finished / batch.total) * 100) : 0;
+  return (
+    <Card>
+      <CardHeader
+        title={batch.name}
+        sub={`batch ${batch.id} · ${batch.finished}/${batch.total} done`}
+        right={
+          <span className="flex items-center gap-2">
+            {batch.succeeded ? <Badge tone="ok">{batch.succeeded} ok</Badge> : null}
+            {batch.failed ? <Badge tone="danger">{batch.failed} failed</Badge> : null}
+            {batch.cost ? <Badge tone="warn">${batch.cost.toFixed(batch.cost < 0.1 ? 4 : 2)} est.</Badge> : null}
+            <Badge tone={batch.status === "running" ? "running" : batch.status === "done" ? "ok" : "warn"}>
+              {batch.status}{batch.dry_run ? " · dry-run" : ""}
+            </Badge>
+            {batch.status === "running" && (
+              <Button variant="ghost" onClick={async () => {
+                try { await api.cancelBatch(batch.id); toast("Stopping batch…", "ok"); }
+                catch (e) { toast(String(e), "error"); }
+              }}>■ Stop</Button>
+            )}
+          </span>
+        }
+      />
+      <div className="px-4 pt-3">
+        <div className="h-1.5 overflow-hidden rounded-full bg-elevated2">
+          <div className="h-full bg-brand transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-3 lg:grid-cols-4">
+        {(batch.runs ?? []).map((r) => (
+          <button key={r.id} onClick={() => onSelect(r.id)}
+            className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-xs transition hover:bg-elevated2 ${
+              r.id === currentRun ? "border-brand bg-brand-soft" : "border-border"
+            }`}>
+            <span className="min-w-0 truncate">
+              <span className="text-muted">#{(r.batch_index ?? 0) + 1}</span>{" "}
+              <span className="font-mono text-ink">{r.id.slice(0, 6)}</span>
+            </span>
+            <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
+          </button>
+        ))}
+        {(batch.runs ?? []).length === 0 && <div className="text-sm text-muted">Queuing runs…</div>}
+      </div>
+    </Card>
   );
 }

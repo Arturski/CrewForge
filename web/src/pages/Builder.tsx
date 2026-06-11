@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Code2, Download, Play, Plus, Trash2 } from "lucide-react";
+import { Code2, Download, Layers, Play, Plus, Trash2 } from "lucide-react";
 import {
   api, type AgentSpec, type KnowledgeBase, type LlmConfig, type Manifest, type Persona, type Schedule, type TaskSpec, type ToolInfo, type Workspace,
 } from "../lib/api";
@@ -60,6 +60,7 @@ export function Builder() {
   const [defaultLlm, setDefaultLlm] = useState<string | null>(null);
   const [dryRun, setDryRun] = useState(true);
   const [inputsOpen, setInputsOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [personaOpen, setPersonaOpen] = useState(false);
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
@@ -140,6 +141,15 @@ export function Builder() {
     if (ws?.inputs?.length) setInputsOpen(true);
     else doRun({});
   }
+  async function doBatch(csv: string) {
+    if (!ws) return;
+    if (dirty) await persist();
+    try {
+      const batch = await api.startBatch({ workspace_id: ws.id, csv, dry_run: dryRun });
+      setBatchOpen(false);
+      navigate(`/runs?batch=${batch.id}`);
+    } catch (e) { toast(String(e), "error"); }
+  }
 
   const refreshPersonas = () => api.personas().then((d) => setPersonas(d.personas)).catch(() => {});
   async function saveAsPersona() {
@@ -200,6 +210,9 @@ export function Builder() {
           </div>
           <Button variant="ghost" size="icon" onClick={() => window.open(api.exportUrl(ws.id), "_blank")} title="Export project"><Download className="h-4 w-4" /></Button>
           <Button variant="ghost" size="icon" onClick={() => navigate(`/code?ws=${ws.id}`)} title="View code"><Code2 className="h-4 w-4" /></Button>
+          {ws.inputs?.some((i) => i.name) && (
+            <Button variant="ghost" onClick={() => setBatchOpen(true)} title="Run this workflow once per row of inputs"><Layers className="h-4 w-4" /> Batch</Button>
+          )}
           <Button onClick={onRun}><Play className="h-4 w-4" /> Run</Button>
         </div>
       </div>
@@ -489,6 +502,10 @@ export function Builder() {
         <InputsDialog inputs={ws.inputs} onClose={() => setInputsOpen(false)}
           onSubmit={(vals) => { setInputsOpen(false); doRun(vals); }} />
       )}
+      {batchOpen && (
+        <BatchDialog inputs={ws.inputs ?? []} dryRun={dryRun}
+          onClose={() => setBatchOpen(false)} onSubmit={doBatch} />
+      )}
       {personaOpen && sel?.kind === "agent" && (
         <PersonaModal personas={personas} onClose={() => setPersonaOpen(false)}
           onChanged={refreshPersonas}
@@ -523,6 +540,45 @@ function InputsDialog({ inputs, onClose, onSubmit }: {
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button onClick={() => onSubmit(vals)}><Play className="h-4 w-4" /> Run</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Launch one run per CSV row. The header names the input variables; the body
+// rows fill them in. Pre-seeds a header + one example row from the defined inputs.
+function BatchDialog({ inputs, dryRun, onClose, onSubmit }: {
+  inputs: { name: string; description?: string; default?: string }[];
+  dryRun: boolean; onClose: () => void; onSubmit: (csv: string) => void;
+}) {
+  const names = inputs.filter((i) => i.name).map((i) => i.name);
+  const [csv, setCsv] = useState(
+    () => `${names.join(",")}\n${names.map((n) => inputs.find((i) => i.name === n)?.default ?? "").join(",")}`,
+  );
+  const rowCount = csv.trim().split(/\r?\n/).filter(Boolean).length - 1; // minus header
+  return (
+    <Modal title="Batch run" onClose={onClose}>
+      <div className="space-y-3">
+        <p className="rounded-md bg-elevated2 px-2.5 py-2 text-xs text-muted">
+          Runs this workflow once per row — each becomes its own tracked run. Paste CSV
+          (or copy straight from a spreadsheet): the first line is the header naming inputs
+          (<code className="text-ink">{names.join(", ") || "no inputs defined"}</code>), each
+          following line is one run.
+        </p>
+        <Textarea className="min-h-40 font-mono text-xs" value={csv}
+          onChange={(e) => setCsv(e.target.value)} spellCheck={false} />
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-muted">
+            {rowCount > 0 ? `${rowCount} run${rowCount === 1 ? "" : "s"} · ` : ""}
+            {dryRun ? "dry-run" : "live"}
+          </span>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button onClick={() => onSubmit(csv)} disabled={rowCount < 1}>
+              <Layers className="h-4 w-4" /> Start batch
+            </Button>
+          </div>
         </div>
       </div>
     </Modal>

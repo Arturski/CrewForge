@@ -94,14 +94,17 @@ class RunManager:
         return (built, False) if built is not None else (FakeLLM(), True)
 
     def start(self, spec: dict[str, Any], *, dry_run: bool = True,
-              inputs: dict[str, Any] | None = None, trigger: str = "manual") -> str:
+              inputs: dict[str, Any] | None = None, trigger: str = "manual",
+              batch_id: str | None = None, batch_index: int | None = None) -> str:
         run_id = uuid.uuid4().hex[:12]
         rec = {
             "id": run_id,
             "workspace_id": spec.get("id", ""),
             "status": "running",
             "dry_run": dry_run,
-            "trigger": trigger,  # manual | webhook | schedule:<id>
+            "trigger": trigger,  # manual | webhook | schedule:<id> | batch:<id>
+            "batch_id": batch_id,  # set when this run is one row of a batch
+            "batch_index": batch_index,
             "spec_name": spec.get("name", "workspace"),
             "started_at": _now(),
             "finished_at": None,

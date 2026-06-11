@@ -61,6 +61,7 @@ def init() -> None:
                     PRIMARY KEY (kb_id, chunk_id)
                 );
                 CREATE TABLE IF NOT EXISTS schedules (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT);
+                CREATE TABLE IF NOT EXISTS batches (id TEXT PRIMARY KEY, workspace_id TEXT, created_at TEXT, data TEXT);
                 """
             )
         _seed_if_empty()
@@ -111,6 +112,37 @@ def save_schedule(s: dict[str, Any]) -> dict[str, Any]:
 def delete_schedule(sid: str) -> None:
     with _conn() as c:
         c.execute("DELETE FROM schedules WHERE id=?", (sid,))
+
+
+# -- batches -----------------------------------------------------------------
+def list_batches(workspace_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    with _conn() as c:
+        if workspace_id:
+            rows = c.execute("SELECT data FROM batches WHERE workspace_id=? "
+                             "ORDER BY created_at DESC LIMIT ?", (workspace_id, limit)).fetchall()
+        else:
+            rows = c.execute("SELECT data FROM batches ORDER BY created_at DESC LIMIT ?",
+                             (limit,)).fetchall()
+    return [json.loads(r["data"]) for r in rows]
+
+
+def get_batch(bid: str) -> dict[str, Any] | None:
+    with _conn() as c:
+        row = c.execute("SELECT data FROM batches WHERE id=?", (bid,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def save_batch(b: dict[str, Any]) -> dict[str, Any]:
+    with _conn() as c:
+        c.execute("INSERT INTO batches (id, workspace_id, created_at, data) VALUES (?,?,?,?) "
+                  "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                  (b["id"], b.get("workspace_id", ""), b.get("created_at", ""), json.dumps(b)))
+    return b
+
+
+def delete_batch(bid: str) -> None:
+    with _conn() as c:
+        c.execute("DELETE FROM batches WHERE id=?", (bid,))
 
 
 # -- personas ----------------------------------------------------------------

@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import batches as batches_mod
 from . import builtin_tools, mcp, registry, store
 from . import knowledge as knowledge_mod
 from . import llms as llms_mod
@@ -261,6 +262,52 @@ async def webhook_trigger(ws_id: str, token: str, req: Request) -> dict[str, Any
     inputs.update({k: str(v) for k, v in (b.get("inputs") or {}).items()})
     run_id = runs.start(ws, dry_run=bool(b.get("dry_run")), inputs=inputs, trigger="webhook")
     return {"run_id": run_id, "workspace_id": ws_id}
+
+
+# ---- Batch runs (one workflow over many input rows) ------------------------
+@app.get("/api/batches")
+def list_batches(workspace_id: str | None = None) -> dict[str, Any]:
+    items = batches_mod.list_batches(workspace_id)
+    names = {w["id"]: w.get("name", "") for w in store.list_workspaces()}
+    for b in items:
+        b["workspace_name"] = names.get(b["workspace_id"], "(deleted)")
+    return {"batches": items}
+
+
+@app.get("/api/batches/{bid}")
+def get_batch(bid: str) -> dict[str, Any]:
+    batch = batches_mod.get(bid)
+    if not batch:
+        raise HTTPException(404, "batch not found")
+    batch["runs"] = [r for r in (store.get_run(rid) for rid in batch.get("run_ids", [])) if r]
+    return batch
+
+
+@app.post("/api/batches")
+async def create_batch(req: Request) -> dict[str, Any]:
+    b = await req.json()
+    ws = store.get_workspace(b.get("workspace_id", ""))
+    if not ws:
+        raise HTTPException(404, "workspace not found")
+    if not ws.get("agents") or not ws.get("tasks"):
+        raise HTTPException(400, "workspace needs at least one agent and one task")
+    input_names = [i["name"] for i in (ws.get("inputs") or []) if i.get("name")]
+    rows = b.get("rows")
+    try:
+        if not rows and b.get("csv"):
+            rows = batches_mod.rows_from_csv(b["csv"], input_names)
+        rows = [{k: str(v) for k, v in (row or {}).items()} for row in (rows or [])]
+        return batches_mod.start(runs, ws, rows, dry_run=bool(b.get("dry_run", True)),
+                                 name=b.get("name"))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@app.post("/api/batches/{bid}/cancel")
+def cancel_batch(bid: str) -> dict[str, Any]:
+    if not batches_mod.cancel(bid):
+        raise HTTPException(404, "no running batch with that id")
+    return {"ok": True}
 
 
 # ---- Skill marketplace (official MCP registry) -----------------------------
