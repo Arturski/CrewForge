@@ -28,7 +28,7 @@ from crewai.events.types.tool_usage_events import (
     ToolUsageStartedEvent,
 )
 
-from . import builtin_tools, llms, mcp, store
+from . import builtin_tools, llms, mcp, pricing, store
 from .compiler.adapter import FakeLLM, build_crew
 
 
@@ -44,17 +44,23 @@ def _ms(start: float | None) -> int | None:
     return round((time.monotonic() - start) * 1000) if start else None
 
 
-def _extract_tokens(ev: Any) -> int:
-    """Best-effort token count from an LLM completion event (provider-dependent)."""
+def _extract_usage(ev: Any) -> tuple[int, int, int]:
+    """Best-effort (prompt, completion, total) tokens from an LLM completion
+    event (provider-dependent shapes)."""
     for attr in ("usage", "token_usage", "response"):
         obj = getattr(ev, attr, None)
         if obj is None:
             continue
-        for key in ("total_tokens", "total"):
+
+        def g(key: str) -> int:
             val = getattr(obj, key, None) or (obj.get(key) if isinstance(obj, dict) else None)
-            if isinstance(val, int):
-                return val
-    return 0
+            return val if isinstance(val, int) else 0
+
+        p, c = g("prompt_tokens"), g("completion_tokens")
+        t = g("total_tokens") or g("total") or (p + c)
+        if p or c or t:
+            return p, c, t
+    return 0, 0, 0
 
 
 class RunCancelled(Exception):
@@ -102,6 +108,7 @@ class RunManager:
             "result": None,
             "error": None,
             "tokens": 0,
+            "cost": None,  # estimated USD (pricing.py); None when unpriced/dry-run
             "inputs": inputs or {},
             "hitl": None,
             "_lock": threading.Lock(),
@@ -271,8 +278,11 @@ class RunManager:
                 reg(AgentExecutionCompletedEvent, on_agent_done)
 
                 def on_llm_done(s, e):
-                    tk = _extract_tokens(e)
+                    p, c, tk = _extract_usage(e)
                     rec["tokens"] += tk
+                    cost = pricing.estimate(getattr(e, "model", None), p, c)
+                    if cost:
+                        rec["cost"] = round((rec.get("cost") or 0.0) + cost, 6)
                     i = st["task_idx"]
                     if i >= 0:
                         st["task_tokens"][i] = st["task_tokens"].get(i, 0) + tk
@@ -305,7 +315,8 @@ class RunManager:
             if rec["_cancel"].is_set():  # crewai may swallow the abort and "finish"
                 raise RunCancelled("run cancelled by user")
             rec["status"] = "succeeded"
-            emit("run.finished", status="succeeded", tokens=rec["tokens"] or None)
+            emit("run.finished", status="succeeded", tokens=rec["tokens"] or None,
+                 cost=rec.get("cost"))
         except RunCancelled:
             rec["status"] = "cancelled"
             emit("run.cancelled")

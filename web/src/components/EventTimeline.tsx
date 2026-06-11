@@ -33,6 +33,7 @@ function detail(e: RunEvent): string {
     e.crew && e.kind === "run.started" && `crew=${e.crew}`,
     e.decision,
     e.error,
+    e.cost && `$${e.cost.toFixed(e.cost < 0.1 ? 4 : 2)} est.`,
   ].filter(Boolean).join("  ");
 }
 

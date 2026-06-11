@@ -21,7 +21,7 @@ uv run uvicorn server.app:app --port 8765 # → http://localhost:8765
 ## Verify / quality gates
 ```bash
 uv run --extra dev ruff check server tests
-uv run --extra dev pytest -q          # 28 tests, no network/model download
+uv run --extra dev pytest -q          # 35 tests, no network/model download
 npm --prefix web run build            # tsc strict
 ```
 Browser-drive with the Playwright MCP; zero console errors is the bar. **Ship phase-by-phase: build → verify → commit → push.**
@@ -71,6 +71,8 @@ Browser-drive with the Playwright MCP; zero console errors is the bar. **Ship ph
 - **MCP env encryption** (`08c8c35`): MCP env values encrypted at rest, masked in all API responses.
 - **Knowledge Phase 3 — Kuzu graph layer**: per-KB embedded Kuzu graph (`knowledge/graph.py`), LLM entity/relation extraction (`knowledge/extract.py`, default LLM connection), explicit **Build graph** (never automatic — ingest stays token-free; incremental over ungraphed chunks, live progress on the KB record), hybrid retrieval (`search_<kb>` tool + test-search append "related facts" from the graph), `GET /api/knowledge/{id}/graph` + `POST .../graph/build`, XyFlow graph preview in the Knowledge page (ring layout, hubs centered).
 - **Conditional tasks**: `task.condition = {check: contains|not_contains|regex, value, case_sensitive?}` → crewai `ConditionalTask` testing the **previous task's output**; no-code editor in the Builder task inspector ("Run condition" select + value, hidden for the first task), IF badge in the task list, GitFork icon + "task · conditional/skipped" label on canvas nodes. The adapter validates (not first task, not async) with friendly errors; the exporter emits a `_condition` predicate + `ConditionalTask`. The runner's `condition_observer` emits `task.skipped` AND resyncs `task_idx` — crewai fires **no task event at all** for a skipped task, which would otherwise desync canvas/timeline correlation.
+- **Built-in tool config + live execution** (`server/builtin_tools.py`): introspects crewai_tools classes (simple pydantic params + `EnvVar` requirements), per-tool config in settings (env encrypted at rest, masked `•••` in responses, masked re-save keeps the secret); live runs instantiate configured built-ins referenced by agent.tools/spec.skills (missing key → `tool.config.error` event, not fatal); Tools page has needs-key/ready badges + a Configure modal; the exporter now actually instantiates built-in tools in generated code (args in `config/tools.yaml`, keys env-only, never exported).
+- **Cost (est. $)** (`server/pricing.py`): curated per-1M-token price table (litellm is no longer a crewai dep, so no free pricing data) with longest-prefix model matching; the runner splits prompt/completion tokens per LLM call and accumulates `run.cost`; shown as "$… est." in the Runs header + `run.finished` timeline row, and as an "est. spend" Dashboard stat. Unknown models show no cost rather than a wrong one.
 
 Commit history on `main` tells the phase-by-phase story (Phases 0–5 + follow-ups).
 
@@ -98,7 +100,7 @@ has not been executed with real keys; the wiring (spec → `llms.build`) is test
 - **Kuzu graphs** live under `knowledge_graphs/<kb_id>` next to the DB (gitignored). Kuzu locks a DB **per process** — `graph.py` caches Database handles and serializes writes; don't open the same KB graph from a second process while the server is running. The build is **explicit** (button/POST), incremental (only ungraphed chunks), and a per-chunk parse failure is skipped, not fatal.
 - A "Phase 3 demo" KB (`kb-05c6f862`, Northwind Robotics) is seeded in the local DB with a hand-built graph for demoing the viz/hybrid search — delete from the Knowledge page if unwanted. **Live LLM extraction has not been run with a real key** (only stub-tested); first real build will verify `extract.py` prompt quality.
 - **MCP stdio** servers (npx/uvx) can hang on cold start in sandboxes — connection path is correct; remote URL servers are more reliable to test.
-- **Built-in tools** are catalogued + exported but **not instantiated for live runs** (most need keys/args). Only **MCP** tools and **knowledge** tools execute live today.
+- **Built-in tools** now execute live once configured (Tools → Configure). `pricing.py` figures are **estimates** from a curated table — update `PRICES` as providers reprice; unknown models intentionally show no cost.
 - **Conditional tasks**: a condition tests the output of the **immediately preceding** task only, and a skipped task's output is **empty** — chained conditionals after a skip see "" (so `contains` fails, `not_contains` passes). crewai fires no task event for a skipped task; the runner's `condition_observer` is what emits `task.skipped` and keeps `task_idx` in sync — don't remove it.
 - **crewai event handlers** run on a thread pool → correlate via closures over the run record, not thread-locals (see `runner.py`).
 - `crewforge.db*` and `secret.key` are gitignored (runtime state; DB re-seeds on boot).
@@ -106,10 +108,9 @@ has not been executed with real keys; the wiring (spec → `llms.build`) is test
 ---
 
 ## Remaining roadmap (priority order)
-1. **Built-in tool config + live execution** (catalogued + exported today, but not instantiated for live runs); **cost ($)** from tokens×pricing.
-2. **Scheduling/triggers** (cron/webhook); **train()/test()/batch**.
-3. Polish: inline marketplace drawer in Builder, final a11y/contrast/touch pass, onboarding tour; migrate Dashboard off `getLlm()` and delete the `/api/settings/llm*` shims.
-4. Verify a **live multi-provider run** end-to-end with real keys (multi-LLM, MCP tools, planning/memory, a real graph build) — everything is wired and stub/dry-run-tested, but no real provider call has been made this cycle.
+1. **Scheduling/triggers** (cron/webhook); **train()/test()/batch**.
+2. Polish: inline marketplace drawer in Builder, final a11y/contrast/touch pass, onboarding tour; migrate Dashboard off `getLlm()` and delete the `/api/settings/llm*` shims.
+3. Verify a **live multi-provider run** end-to-end with real keys (multi-LLM, MCP + built-in tools, planning/memory, a real graph build, real cost figures) — everything is wired and stub/dry-run-tested, but no real provider call has been made this cycle.
 
 ## References
 - Full design + phase history: `/Users/arthur/.claude/plans/system-design-see-the-crew-cheerful-lake.md` (PLAN v4 section = knowledge graph + this roadmap).

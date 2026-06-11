@@ -57,12 +57,14 @@ export interface RunEvent {
   agent?: string; crew?: string; decision?: string; status?: string;
   error?: string; chars?: number; mode?: string; tokens?: number;
   task?: string; task_index?: number; ms?: number; tool?: string; count?: number;
+  cost?: number | null; // run.finished: estimated USD
 }
 
 export interface RunRecord {
   id: string; status: "running" | "succeeded" | "failed" | "cancelled";
   dry_run: boolean; spec_name: string; started_at: string; finished_at: string | null;
   result: string | null; error: string | null; event_count: number; tokens?: number;
+  cost?: number | null; // estimated USD from tokens × curated pricing (live runs)
   workspace_id?: string;
   inputs?: Record<string, string>; // run-time variables this run started with
   hitl?: { output: string; since: string } | null; // set while blocked at a human gate

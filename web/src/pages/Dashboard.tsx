@@ -14,6 +14,7 @@ export function Dashboard() {
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [llm, setLlm] = useState<LlmSettings | null>(null);
   const [runCount, setRunCount] = useState<number | null>(null);
+  const [spend, setSpend] = useState<number>(0);
   const [creating, setCreating] = useState(false);
 
   function load() {
@@ -23,7 +24,10 @@ export function Dashboard() {
     load();
     api.templates().then((d) => setTemplates(d.templates)).catch(() => {});
     api.getLlm().then(setLlm).catch(() => {});
-    api.runs().then((d) => setRunCount(d.runs.length)).catch(() => {});
+    api.runs().then((d) => {
+      setRunCount(d.runs.length);
+      setSpend(d.runs.reduce((s, r) => s + (r.cost || 0), 0));
+    }).catch(() => {});
   }, []);
 
   async function remove(id: string) {
@@ -49,7 +53,7 @@ export function Dashboard() {
         <Stat label="workflows" value={String(workspaces.length)} tone="brand" />
         <Stat label="active model" value={llm?.configured ? (llm.model || "set") : "dry-run"} tone={llm?.configured ? "ok" : "muted"} />
         <Stat label="total runs" value={runCount == null ? "…" : String(runCount)} tone="ink" />
-        <Stat label="crewai" value="1.14.6" tone="ink" />
+        <Stat label="est. spend" value={spend ? `$${spend.toFixed(spend < 0.1 ? 4 : 2)}` : "$0"} tone="ink" />
       </div>
 
       <Card>
