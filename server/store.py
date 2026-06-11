@@ -60,6 +60,7 @@ def init() -> None:
                     kb_id TEXT, chunk_id TEXT, source_id TEXT, text TEXT, emb TEXT, meta TEXT,
                     PRIMARY KEY (kb_id, chunk_id)
                 );
+                CREATE TABLE IF NOT EXISTS schedules (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT);
                 """
             )
         _seed_if_empty()
@@ -80,6 +81,36 @@ def _seed_if_empty() -> None:
             for p in PERSONAS:
                 c.execute("INSERT INTO personas (id, data, seeded) VALUES (?,?,1)",
                           (p["id"], json.dumps(p)))
+
+
+# -- schedules ---------------------------------------------------------------
+def list_schedules(workspace_id: str | None = None) -> list[dict[str, Any]]:
+    with _conn() as c:
+        if workspace_id:
+            rows = c.execute("SELECT data FROM schedules WHERE workspace_id=? ORDER BY id",
+                             (workspace_id,)).fetchall()
+        else:
+            rows = c.execute("SELECT data FROM schedules ORDER BY id").fetchall()
+    return [json.loads(r["data"]) for r in rows]
+
+
+def get_schedule(sid: str) -> dict[str, Any] | None:
+    with _conn() as c:
+        row = c.execute("SELECT data FROM schedules WHERE id=?", (sid,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def save_schedule(s: dict[str, Any]) -> dict[str, Any]:
+    with _conn() as c:
+        c.execute("INSERT INTO schedules (id, workspace_id, data) VALUES (?,?,?) "
+                  "ON CONFLICT(id) DO UPDATE SET workspace_id=excluded.workspace_id, data=excluded.data",
+                  (s["id"], s.get("workspace_id", ""), json.dumps(s)))
+    return s
+
+
+def delete_schedule(sid: str) -> None:
+    with _conn() as c:
+        c.execute("DELETE FROM schedules WHERE id=?", (sid,))
 
 
 # -- personas ----------------------------------------------------------------

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Code2, Download, Play, Plus, Trash2 } from "lucide-react";
 import {
-  api, type AgentSpec, type KnowledgeBase, type LlmConfig, type Manifest, type Persona, type TaskSpec, type ToolInfo, type Workspace,
+  api, type AgentSpec, type KnowledgeBase, type LlmConfig, type Manifest, type Persona, type Schedule, type TaskSpec, type ToolInfo, type Workspace,
 } from "../lib/api";
 import {
   Badge, Button, Card, CardHeader, Input, LabeledField, Modal, Select, Textarea, Toggle, Tooltip,
@@ -291,6 +291,7 @@ export function Builder() {
                 className="inline-flex items-center gap-1 text-sm text-brand hover:underline"><Plus className="h-3 w-3" /> Add input</button>
             </div>
           </Card>
+          <TriggersCard ws={ws} mutate={mutate} />
           <Card>
             <CardHeader title="Agents" right={<button onClick={addAgent} className="text-sm text-brand hover:underline">+ Add</button>} />
             <div className="divide-y divide-border">
@@ -546,6 +547,100 @@ function KnowledgePicker({ all, value, onChange }: { all: KnowledgeBase[]; value
         );
       })}
     </div>
+  );
+}
+
+const CRON_PRESETS: [string, string][] = [
+  ["*/15 * * * *", "Every 15 minutes"],
+  ["0 * * * *", "Every hour"],
+  ["0 9 * * *", "Every day at 09:00"],
+  ["0 9 * * 1", "Mondays at 09:00"],
+];
+
+function TriggersCard({ ws, mutate }: { ws: Workspace; mutate: (fn: (w: Workspace) => void) => void }) {
+  const toast = useToast();
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [cron, setCron] = useState("0 9 * * *");
+  const [custom, setCustom] = useState("");
+
+  const load = useCallback(() => api.schedules(ws.id).then((d) => setSchedules(d.schedules)).catch(() => {}), [ws.id]);
+  useEffect(() => { load(); }, [load]);
+
+  async function add() {
+    const expr = cron === "custom" ? custom.trim() : cron;
+    if (!expr) return;
+    try { await api.createSchedule({ workspace_id: ws.id, cron: expr }); setCustom(""); load(); toast("Schedule added", "ok"); }
+    catch (e) { toast(String(e), "error"); }
+  }
+  async function toggle(s: Schedule) {
+    try { await api.updateSchedule(s.id, { enabled: !s.enabled }); load(); }
+    catch (e) { toast(String(e), "error"); }
+  }
+  async function remove(s: Schedule) {
+    try { await api.deleteSchedule(s.id); load(); } catch (e) { toast(String(e), "error"); }
+  }
+  function copyHookUrl() {
+    navigator.clipboard.writeText(`${location.origin}/api/hooks/${ws.id}/${ws.hook_token}`)
+      .then(() => toast("Webhook URL copied", "ok"), () => toast("Copy failed", "error"));
+  }
+  const newToken = () => crypto.randomUUID().replaceAll("-", "");
+
+  return (
+    <Card>
+      <CardHeader title="Triggers" sub="Run this workflow on a schedule or from other systems." />
+      <div className="space-y-4 p-4">
+        <div>
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
+            Schedule (cron)<Tooltip text="Runs use the workflow's current design, run-input defaults, and your default model (live). The server must be running at fire time." />
+          </div>
+          {schedules.map((s) => (
+            <div key={s.id} className="mb-1 flex items-center gap-2 rounded-md border border-border bg-canvas px-2.5 py-1.5 text-xs">
+              <code className="text-ink">{s.cron}</code>
+              <span className="truncate text-muted">
+                {s.enabled ? (s.next_run_at ? `next ${new Date(s.next_run_at).toLocaleString()}` : "") : "paused"}
+              </span>
+              <span className="ml-auto flex shrink-0 items-center gap-2">
+                <button onClick={() => toggle(s)} className="text-brand hover:underline">{s.enabled ? "Pause" : "Resume"}</button>
+                <button onClick={() => remove(s)} className="text-muted hover:text-danger" aria-label="Delete schedule"><Trash2 className="h-3.5 w-3.5" /></button>
+              </span>
+            </div>
+          ))}
+          <div className="mt-1 flex gap-2">
+            <Select className="w-44 shrink-0" value={cron} onChange={(e) => setCron(e.target.value)}>
+              {CRON_PRESETS.map(([expr, label]) => <option key={expr} value={expr}>{label}</option>)}
+              <option value="custom">Custom cron…</option>
+            </Select>
+            {cron === "custom" && (
+              <Input className="flex-1 font-mono" placeholder="*/30 8-18 * * 1-5" value={custom}
+                onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
+            )}
+            <Button variant="ghost" onClick={add}><Plus className="h-4 w-4" /> Add</Button>
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted">
+            Webhook<Tooltip text='POST this URL to start a run from another system. Optional JSON body: "inputs" (run variables) and "dry_run". Anyone with the URL can trigger runs — rotate it if it leaks.' />
+          </div>
+          {ws.hook_token ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 rounded-md border border-border bg-canvas px-2.5 py-1.5 text-xs">
+                <code className="truncate text-ink">POST /api/hooks/{ws.id}/{ws.hook_token}</code>
+                <span className="ml-auto flex shrink-0 items-center gap-2">
+                  <button onClick={copyHookUrl} className="text-brand hover:underline">Copy URL</button>
+                  <button onClick={() => { mutate((w) => { w.hook_token = newToken(); }); toast("Token rotated", "ok"); }}
+                    className="text-brand hover:underline">Rotate</button>
+                  <button onClick={() => mutate((w) => { delete w.hook_token; })}
+                    className="text-muted hover:text-danger">Disable</button>
+                </span>
+              </div>
+            </div>
+          ) : (
+            <Button variant="ghost" onClick={() => mutate((w) => { w.hook_token = newToken(); })}>Enable webhook</Button>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }
 

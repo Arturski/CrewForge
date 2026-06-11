@@ -104,6 +104,7 @@ export function Runs() {
                 <span className="flex items-center gap-2">
                   {record.tokens ? <Badge tone="running">{record.tokens} tokens</Badge> : null}
                   {record.cost ? <Badge tone="warn">${record.cost.toFixed(record.cost < 0.1 ? 4 : 2)} est.</Badge> : null}
+                  {record.trigger && record.trigger !== "manual" ? <Badge tone="brand">{record.trigger.split(":")[0]}</Badge> : null}
                   <Badge tone={STATUS_TONE[record.status]}>
                     {record.status}{record.dry_run ? " · dry-run" : ""}
                   </Badge>

@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from . import builtin_tools, mcp, registry, store
 from . import knowledge as knowledge_mod
 from . import llms as llms_mod
+from . import schedules as schedules_mod
 from . import templates as templates_mod
 from .compiler.exporter import export_files, export_zip
 from .compiler.manifest import build_manifest
@@ -26,6 +27,7 @@ from .runner import RunManager
 app = FastAPI(title="CrewForge", version="0.2.0")
 store.init()
 runs = RunManager()
+schedules_mod.start(runs)
 
 WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
 
@@ -182,6 +184,83 @@ def build_knowledge_graph(kb_id: str) -> dict[str, Any]:
         raise HTTPException(404, "knowledge base not found") from None
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
+
+
+# ---- Schedules + webhook triggers ------------------------------------------
+@app.get("/api/schedules")
+def list_schedules(workspace_id: str | None = None) -> dict[str, Any]:
+    items = store.list_schedules(workspace_id)
+    names = {w["id"]: w.get("name", "") for w in store.list_workspaces()}
+    for s in items:
+        s["workspace_name"] = names.get(s["workspace_id"], "(deleted)")
+    return {"schedules": items}
+
+
+@app.post("/api/schedules")
+async def create_schedule(req: Request) -> dict[str, Any]:
+    b = await req.json()
+    if not store.get_workspace(b.get("workspace_id", "")):
+        raise HTTPException(404, "workspace not found")
+    try:
+        return schedules_mod.create(b["workspace_id"], b.get("cron", ""),
+                                    inputs=b.get("inputs"), dry_run=bool(b.get("dry_run")),
+                                    enabled=b.get("enabled", True))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@app.put("/api/schedules/{sid}")
+async def update_schedule(sid: str, req: Request) -> dict[str, Any]:
+    b = await req.json()
+    try:
+        s = schedules_mod.update(sid, b)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    if not s:
+        raise HTTPException(404, "schedule not found")
+    return s
+
+
+@app.delete("/api/schedules/{sid}")
+def delete_schedule(sid: str) -> dict[str, Any]:
+    store.delete_schedule(sid)
+    return {"ok": True}
+
+
+@app.post("/api/workspaces/{ws_id}/hook")
+def create_hook(ws_id: str) -> dict[str, Any]:
+    """Generate (or rotate) the workspace's webhook token."""
+    ws = store.get_workspace(ws_id)
+    if not ws:
+        raise HTTPException(404, "workspace not found")
+    ws["hook_token"] = uuid.uuid4().hex
+    store.save_workspace(ws)
+    return {"url": f"/api/hooks/{ws_id}/{ws['hook_token']}"}
+
+
+@app.delete("/api/workspaces/{ws_id}/hook")
+def delete_hook(ws_id: str) -> dict[str, Any]:
+    ws = store.get_workspace(ws_id)
+    if not ws:
+        raise HTTPException(404, "workspace not found")
+    ws.pop("hook_token", None)
+    store.save_workspace(ws)
+    return {"ok": True}
+
+
+@app.post("/api/hooks/{ws_id}/{token}")
+async def webhook_trigger(ws_id: str, token: str, req: Request) -> dict[str, Any]:
+    """Public trigger: start a run with optional {inputs, dry_run} JSON body."""
+    ws = store.get_workspace(ws_id)
+    if not ws or not ws.get("hook_token") or ws["hook_token"] != token:
+        raise HTTPException(404, "unknown hook")  # don't reveal which part failed
+    if not ws.get("agents") or not ws.get("tasks"):
+        raise HTTPException(400, "workspace needs at least one agent and one task")
+    b = await req.json() if await req.body() else {}
+    inputs = {i["name"]: i.get("default") or "" for i in (ws.get("inputs") or []) if i.get("name")}
+    inputs.update({k: str(v) for k, v in (b.get("inputs") or {}).items()})
+    run_id = runs.start(ws, dry_run=bool(b.get("dry_run")), inputs=inputs, trigger="webhook")
+    return {"run_id": run_id, "workspace_id": ws_id}
 
 
 # ---- Skill marketplace (official MCP registry) -----------------------------

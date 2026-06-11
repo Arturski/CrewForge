@@ -8,6 +8,7 @@ requires-python = ">=3.10,<3.14"
 dependencies = [
     "crewai>=1.14.6",
     "crewai-tools>=1.14.6",
+    "croniter>=6.2.2",
     "cryptography>=48.0.0",
     "fastapi>=0.136.3",
     "fastembed>=0.8.0",

@@ -48,6 +48,7 @@ export interface Workspace {
   planning?: boolean; // crew plans before executing
   memory?: boolean; // crew memory (live runs)
   knowledge?: string[]; // workflow-level knowledge base ids
+  hook_token?: string; // webhook trigger token (POST /api/hooks/{id}/{token})
   llm_id?: string; // configured LLM connection for the whole crew; blank = default
   manager_agent_id?: string; // hierarchical only: agent that manages the crew
 }
@@ -65,6 +66,7 @@ export interface RunRecord {
   dry_run: boolean; spec_name: string; started_at: string; finished_at: string | null;
   result: string | null; error: string | null; event_count: number; tokens?: number;
   cost?: number | null; // estimated USD from tokens × curated pricing (live runs)
+  trigger?: string; // manual | webhook | schedule:<id>
   workspace_id?: string;
   inputs?: Record<string, string>; // run-time variables this run started with
   hitl?: { output: string; since: string } | null; // set while blocked at a human gate
@@ -87,6 +89,12 @@ export interface Persona {
 }
 export interface TemplateSummary {
   id: string; name: string; description: string; agents: number; tasks: number;
+}
+
+export interface Schedule {
+  id: string; workspace_id: string; workspace_name?: string;
+  cron: string; inputs: Record<string, string>; dry_run: boolean; enabled: boolean;
+  next_run_at: string | null; last_run_at: string | null; last_run_id: string | null;
 }
 
 export interface KnowledgeSource {
@@ -164,6 +172,15 @@ export const api = {
   health: () => req<{ status: string; crewai_version: string; version: string }>("/api/health"),
   manifest: () => req<Manifest>("/api/manifest"),
   tools: () => req<{ tools: ToolInfo[] }>("/api/tools"),
+  schedules: (workspaceId?: string) =>
+    req<{ schedules: Schedule[] }>(`/api/schedules${workspaceId ? `?workspace_id=${workspaceId}` : ""}`),
+  createSchedule: (body: { workspace_id: string; cron: string; dry_run?: boolean; inputs?: Record<string, string> }) =>
+    req<Schedule>("/api/schedules", json("POST", body)),
+  updateSchedule: (id: string, body: Partial<Pick<Schedule, "cron" | "dry_run" | "enabled" | "inputs">>) =>
+    req<Schedule>(`/api/schedules/${id}`, json("PUT", body)),
+  deleteSchedule: (id: string) => req<{ ok: boolean }>(`/api/schedules/${id}`, { method: "DELETE" }),
+  createHook: (wsId: string) => req<{ url: string }>(`/api/workspaces/${wsId}/hook`, { method: "POST" }),
+  deleteHook: (wsId: string) => req<{ ok: boolean }>(`/api/workspaces/${wsId}/hook`, { method: "DELETE" }),
   builtinTool: (name: string) => req<ToolConfig>(`/api/tools/builtin/${name}`),
   setBuiltinToolConfig: (name: string, body: { args: Record<string, unknown>; env: Record<string, string> }) =>
     req<ToolConfig>(`/api/tools/builtin/${name}/config`, json("PUT", body)),

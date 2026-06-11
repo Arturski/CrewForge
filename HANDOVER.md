@@ -21,7 +21,7 @@ uv run uvicorn server.app:app --port 8765 # → http://localhost:8765
 ## Verify / quality gates
 ```bash
 uv run --extra dev ruff check server tests
-uv run --extra dev pytest -q          # 35 tests, no network/model download
+uv run --extra dev pytest -q          # 39 tests, no network/model download
 npm --prefix web run build            # tsc strict
 ```
 Browser-drive with the Playwright MCP; zero console errors is the bar. **Ship phase-by-phase: build → verify → commit → push.**
@@ -73,6 +73,7 @@ Browser-drive with the Playwright MCP; zero console errors is the bar. **Ship ph
 - **Conditional tasks**: `task.condition = {check: contains|not_contains|regex, value, case_sensitive?}` → crewai `ConditionalTask` testing the **previous task's output**; no-code editor in the Builder task inspector ("Run condition" select + value, hidden for the first task), IF badge in the task list, GitFork icon + "task · conditional/skipped" label on canvas nodes. The adapter validates (not first task, not async) with friendly errors; the exporter emits a `_condition` predicate + `ConditionalTask`. The runner's `condition_observer` emits `task.skipped` AND resyncs `task_idx` — crewai fires **no task event at all** for a skipped task, which would otherwise desync canvas/timeline correlation.
 - **Built-in tool config + live execution** (`server/builtin_tools.py`): introspects crewai_tools classes (simple pydantic params + `EnvVar` requirements), per-tool config in settings (env encrypted at rest, masked `•••` in responses, masked re-save keeps the secret); live runs instantiate configured built-ins referenced by agent.tools/spec.skills (missing key → `tool.config.error` event, not fatal); Tools page has needs-key/ready badges + a Configure modal; the exporter now actually instantiates built-in tools in generated code (args in `config/tools.yaml`, keys env-only, never exported).
 - **Cost (est. $)** (`server/pricing.py`): curated per-1M-token price table (litellm is no longer a crewai dep, so no free pricing data) with longest-prefix model matching; the runner splits prompt/completion tokens per LLM call and accumulates `run.cost`; shown as "$… est." in the Runs header + `run.finished` timeline row, and as an "est. spend" Dashboard stat. Unknown models show no cost rather than a wrong one.
+- **Scheduling + webhook triggers** (`server/schedules.py`, croniter dep): cron schedules per workspace (CRUD via `/api/schedules`, `schedules` table) executed by an in-process daemon thread (15s tick; due schedules advance `next_run_at` BEFORE starting so a crash can't hot-loop; busy workspace → skip tick; deleted workspace → schedule auto-disabled; run uses the workspace's current spec + run-input defaults merged with schedule-pinned inputs). Webhook: `ws.hook_token` (spec field — the Builder generates/rotates it client-side via `mutate` so autosave can't clobber it; server endpoints `POST/DELETE /api/workspaces/{id}/hook` also exist) → public `POST /api/hooks/{ws_id}/{token}` with optional `{inputs, dry_run}` body. Runs carry `trigger` (manual | webhook | schedule:<id>), badged in the Runs header. Builder gained a "Triggers" card (cron presets + custom, pause/resume/delete, webhook URL copy/rotate/disable).
 
 Commit history on `main` tells the phase-by-phase story (Phases 0–5 + follow-ups).
 
@@ -97,6 +98,7 @@ has not been executed with real keys; the wiring (spec → `llms.build`) is test
 - **MiniMax**: use `hosted_vllm/<model>` + base `https://api.minimax.io/v1` (crewai rejects `openai/`/`anthropic/` for non-native model names; only `hosted_vllm` passes). MiniMax has **no `/models` endpoint** (Refresh hidden). The user still needs to confirm a live chat works with their key (Test connection) — if MiniMax's OpenAI-compatible `/v1` rejects the key, may need a MiniMax-native path.
 - **Dry-run gating**: planning, memory, `output_pydantic` only activate live (the `FakeLLM` can't do structured output / embeddings). Don't "fix" dry-run to enable them.
 - **fastembed** downloads `BAAI/bge-small-en-v1.5` (~130MB) on first embed; cached after. Knowledge vector search is keyless; **graph extraction needs a provider** (Build graph errors cleanly without one).
+- **Schedules fire only while the server runs** (in-process thread, no catch-up for missed windows) and evaluate cron in server-local time. The webhook token is a capability URL — anyone holding it can start runs; rotate from the Builder Triggers card.
 - **Kuzu graphs** live under `knowledge_graphs/<kb_id>` next to the DB (gitignored). Kuzu locks a DB **per process** — `graph.py` caches Database handles and serializes writes; don't open the same KB graph from a second process while the server is running. The build is **explicit** (button/POST), incremental (only ungraphed chunks), and a per-chunk parse failure is skipped, not fatal.
 - A "Phase 3 demo" KB (`kb-05c6f862`, Northwind Robotics) is seeded in the local DB with a hand-built graph for demoing the viz/hybrid search — delete from the Knowledge page if unwanted. **Live LLM extraction has not been run with a real key** (only stub-tested); first real build will verify `extract.py` prompt quality.
 - **MCP stdio** servers (npx/uvx) can hang on cold start in sandboxes — connection path is correct; remote URL servers are more reliable to test.
@@ -108,7 +110,7 @@ has not been executed with real keys; the wiring (spec → `llms.build`) is test
 ---
 
 ## Remaining roadmap (priority order)
-1. **Scheduling/triggers** (cron/webhook); **train()/test()/batch**.
+1. **train()/test()/batch (kickoff_for_each)** — quality tooling (the cron/webhook half of this item shipped).
 2. Polish: inline marketplace drawer in Builder, final a11y/contrast/touch pass, onboarding tour; migrate Dashboard off `getLlm()` and delete the `/api/settings/llm*` shims.
 3. Verify a **live multi-provider run** end-to-end with real keys (multi-LLM, MCP + built-in tools, planning/memory, a real graph build, real cost figures) — everything is wired and stub/dry-run-tested, but no real provider call has been made this cycle.
 
