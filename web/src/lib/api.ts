@@ -83,11 +83,6 @@ export interface Batch {
   runs?: RunRecord[]; // only on the single-batch fetch
 }
 
-export interface LlmSettings {
-  configured: boolean; model: string; base_url: string;
-  temperature: number | null; api_key_set: boolean;
-}
-
 // One named LLM connection (multiple may be configured; one is the default).
 export interface LlmConfig {
   id: string; name: string; model: string; base_url: string;
@@ -210,10 +205,6 @@ export const api = {
   deleteWorkspace: (id: string) => req<{ ok: boolean }>(`/api/workspaces/${id}`, { method: "DELETE" }),
   code: (id: string) => req<{ files: Record<string, string> }>(`/api/workspaces/${id}/code`),
   exportUrl: (id: string) => `/api/workspaces/${id}/export`,
-
-  getLlm: () => req<LlmSettings>("/api/settings/llm"),
-  saveLlm: (cfg: Partial<{ model: string; base_url: string; temperature: number; api_key: string; clear_api_key: boolean }>) =>
-    req<{ ok: boolean }>("/api/settings/llm", json("PUT", cfg)),
 
   // Multiple named LLM connections (selectable per workflow / per agent).
   llms: () => req<{ llms: LlmConfig[]; default: string | null }>("/api/llms"),

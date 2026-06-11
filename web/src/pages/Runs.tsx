@@ -93,7 +93,7 @@ export function Runs() {
         <Button onClick={startDemo}>▶ Run a workflow</Button>
       </div>
 
-      {batchId && <BatchPanel batchId={batchId} currentRun={runId} onSelect={selectRun} />}
+      {batchId && <BatchPanel batchId={batchId} currentRun={runId} onSelect={selectRun} onSettled={refreshRecent} />}
 
       {workspace && (
         <Card className="overflow-hidden">
@@ -237,21 +237,30 @@ function HitlPanel({ runId, output, onDecided }: {
 
 // A batch ran one workflow over many input rows; this shows the group's live
 // progress and lets you open any row. Polls while the batch is still running.
-function BatchPanel({ batchId, currentRun, onSelect }: {
-  batchId: string; currentRun: string | null; onSelect: (id: string) => void;
+function BatchPanel({ batchId, currentRun, onSelect, onSettled }: {
+  batchId: string; currentRun: string | null;
+  onSelect: (id: string) => void; onSettled: () => void;
 }) {
   const toast = useToast();
   const [batch, setBatch] = useState<Batch | null>(null);
+  const settledRef = useRef(false);
 
   useEffect(() => {
+    settledRef.current = false;
     let live = true;
-    const load = () => api.batch(batchId).then((b) => { if (live) setBatch(b); }).catch(() => {});
+    const load = () => api.batch(batchId).then((b) => {
+      if (!live) return;
+      setBatch(b);
+      // Once the batch reaches a terminal state, refresh the recent-runs list
+      // (its rows finished off-screen and would otherwise show stale status).
+      if (b.status !== "running" && !settledRef.current) { settledRef.current = true; onSettled(); }
+    }).catch(() => {});
     load();
     const t = window.setInterval(() => {
       setBatch((prev) => { if (prev && prev.status !== "running") return prev; load(); return prev; });
     }, 1500);
     return () => { live = false; window.clearInterval(t); };
-  }, [batchId]);
+  }, [batchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!batch) return null;
   const pct = batch.total ? Math.round((batch.finished / batch.total) * 100) : 0;
@@ -278,7 +287,9 @@ function BatchPanel({ batchId, currentRun, onSelect }: {
         }
       />
       <div className="px-4 pt-3">
-        <div className="h-1.5 overflow-hidden rounded-full bg-elevated2">
+        <div className="h-1.5 overflow-hidden rounded-full bg-elevated2"
+          role="progressbar" aria-valuenow={batch.finished} aria-valuemin={0} aria-valuemax={batch.total}
+          aria-label={`${batch.finished} of ${batch.total} runs complete`}>
           <div className="h-full bg-brand transition-all" style={{ width: `${pct}%` }} />
         </div>
       </div>

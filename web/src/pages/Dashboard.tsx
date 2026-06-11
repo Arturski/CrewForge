@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  api, type LlmSettings, type TemplateSummary, type WorkspaceSummary,
+  api, type LlmConfig, type TemplateSummary, type WorkspaceSummary,
 } from "../lib/api";
 import { Button, Card, CardHeader, Input, Modal, Pill } from "../components/ui";
 import { useToast } from "../lib/toast";
@@ -12,7 +12,7 @@ export function Dashboard() {
   const toast = useToast();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
-  const [llm, setLlm] = useState<LlmSettings | null>(null);
+  const [llms, setLlms] = useState<{ llms: LlmConfig[]; default: string | null } | null>(null);
   const [runCount, setRunCount] = useState<number | null>(null);
   const [spend, setSpend] = useState<number>(0);
   const [creating, setCreating] = useState(false);
@@ -23,7 +23,7 @@ export function Dashboard() {
   useEffect(() => {
     load();
     api.templates().then((d) => setTemplates(d.templates)).catch(() => {});
-    api.getLlm().then(setLlm).catch(() => {});
+    api.llms().then(setLlms).catch(() => {});
     api.runs().then((d) => {
       setRunCount(d.runs.length);
       setSpend(d.runs.reduce((s, r) => s + (r.cost || 0), 0));
@@ -39,6 +39,9 @@ export function Dashboard() {
     catch (e) { toast(String(e), "error"); }
   }
 
+  const defaultLlm = llms?.llms.find((l) => l.id === llms.default) ?? null;
+  const modelLabel = defaultLlm ? (defaultLlm.model || defaultLlm.name || "set") : "dry-run";
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -51,7 +54,7 @@ export function Dashboard() {
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat label="workflows" value={String(workspaces.length)} tone="brand" />
-        <Stat label="active model" value={llm?.configured ? (llm.model || "set") : "dry-run"} tone={llm?.configured ? "ok" : "muted"} />
+        <Stat label="active model" value={modelLabel} tone={defaultLlm ? "ok" : "muted"} />
         <Stat label="total runs" value={runCount == null ? "…" : String(runCount)} tone="ink" />
         <Stat label="est. spend" value={spend ? `$${spend.toFixed(spend < 0.1 ? 4 : 2)}` : "$0"} tone="ink" />
       </div>

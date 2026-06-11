@@ -415,46 +415,6 @@ async def test_llm(req: Request) -> dict[str, Any]:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
 
 
-# ---- settings (compat shims over the LLM list; current single-LLM UI uses these)
-@app.get("/api/settings/llm")
-def get_llm_settings() -> dict[str, Any]:
-    pub = llms_mod.list_public()
-    default = next((x for x in pub["llms"] if x["id"] == pub["default"]), None)
-    return {"configured": bool(default), "model": default["model"] if default else "",
-            "base_url": default["base_url"] if default else "",
-            "temperature": default.get("temperature") if default else None,
-            "api_key_set": bool(default)}
-
-
-@app.put("/api/settings/llm")
-async def put_llm_settings(req: Request) -> dict[str, Any]:
-    body = await req.json()
-    default_id = llms_mod.list_public()["default"]
-    cfg: dict[str, Any] = {"id": default_id, "name": body.get("model", "Default"),
-                           "model": body.get("model", ""), "base_url": body.get("base_url", ""),
-                           "temperature": body.get("temperature")}
-    if body.get("api_key"):
-        cfg["api_key"] = body["api_key"]
-    res = llms_mod.upsert(cfg)
-    llms_mod.set_default(res["id"])
-    return {"ok": True}
-
-
-@app.post("/api/settings/llm/models")
-async def list_provider_models(req: Request) -> dict[str, Any]:
-    from . import providers
-    b = await req.json() if await req.body() else {}
-    try:
-        return {"models": providers.fetch_models(b.get("provider", "openai"), b.get("base_url", ""), _key_for(b))}
-    except Exception as e:  # noqa: BLE001
-        return {"models": [], "error": f"{type(e).__name__}: {e}"[:200]}
-
-
-@app.post("/api/settings/llm/test")
-async def test_llm_compat(req: Request) -> dict[str, Any]:
-    return await test_llm(req)
-
-
 # ---- workspaces (CRUD) -----------------------------------------------------
 @app.get("/api/workspaces")
 def list_workspaces() -> dict[str, Any]:

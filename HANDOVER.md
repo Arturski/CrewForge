@@ -82,14 +82,17 @@ Commit history on `main` tells the phase-by-phase story (Phases 0–6 + follow-u
 ---
 
 ## ✅ No work in flight
-The multi-LLM frontend (formerly the in-flight item) shipped in `9328d5d`: Settings is a
-connection list (add/edit/delete/set-default), Builder has a workflow LLM select
-(`ws.llm_id`) and per-agent selects (`agent.llm_id`). The legacy `/api/settings/llm*`
-compat shims remain only because `Dashboard.tsx` still calls `getLlm()` for its
-"active model" stat — migrate that, then delete the shims.
+The multi-LLM frontend shipped in `9328d5d`: Settings is a connection list
+(add/edit/delete/set-default), Builder has a workflow LLM select (`ws.llm_id`) and
+per-agent selects (`agent.llm_id`). The legacy `/api/settings/llm*` compat shims and
+the `getLlm`/`saveLlm`/`LlmSettings` client API are **gone** — `Dashboard.tsx` now
+derives its "active model" stat from `api.llms()` (the default connection). The only
+LLM endpoints are `/api/llms*` (`/models`, `/test`, `/default`).
 
 One unverified path: a **live** multi-provider run (each agent on its own provider)
 has not been executed with real keys; the wiring (spec → `llms.build`) is test-covered.
+Every page has been browser-verified (Playwright) with **zero console errors**, incl.
+the full batch lifecycle (launch → grouped Runs view → per-row drill-in) on desktop + mobile.
 
 ---
 
@@ -112,10 +115,18 @@ has not been executed with real keys; the wiring (spec → `llms.build`) is test
 
 ---
 
-## Remaining roadmap (priority order)
-1. **train()/test()** — quality tooling (the cron/webhook AND batch `kickoff_for_each` halves of this item shipped). What's left — crewai's human-feedback `train()` loop and the LLM-scored `test()` eval — both need a **live** model to mean anything (FakeLLM can't produce trainable/scorable output), so they're gated on item 3 below and are lower-value for a single-user no-code studio.
-2. Polish: inline marketplace drawer in Builder, final a11y/contrast/touch pass, onboarding tour; migrate Dashboard off `getLlm()` and delete the `/api/settings/llm*` shims.
-3. Verify a **live multi-provider run** end-to-end with real keys (multi-LLM, MCP + built-in tools, planning/memory, a real graph build, real cost figures) — everything is wired and stub/dry-run-tested, but no real provider call has been made this cycle.
+## Near-term (small, ready to pick up)
+1. **Live multi-provider verification** *(validation, not a build — needs the user's keys)*. Run a real workflow end-to-end: multi-LLM (each agent on its own provider), MCP + built-in tools, planning/memory, a real **Build graph** (first real `extract.py` exercise), real cost figures. Everything is wired + stub/dry-run-tested; no real provider call has been made this cycle. This unblocks the eval phase below.
+2. **Onboarding tour** — a first-run guided walkthrough (build → dry-run → observe → go live). Low risk, high "first 5 minutes" payoff. The empty states already point the way; a tour stitches them.
+3. **Inline MCP marketplace drawer in Builder** — today adding an integration means leaving for the Tools page; a slide-over drawer (reuse `registry.search` + the Tools connect flow) lets you add + attach without losing canvas context.
+
+## Next larger phases (ordered by product value)
+1. **Quality & evaluation suite** (the `train()`/`test()` item, reimagined on top of batch). Batch runs are now the execution substrate; layer scoring on top: a **Quality** tab where you pin a labeled test set, run the workflow over it (batch), and score outputs with **LLM-as-judge** (and/or exact-match/regex assertions) → pass-rate, per-row diffs, regressions. Fold in crewai's human-feedback `train()` loop to capture preference data. Needs a live model (gated on near-term #1). This is the highest-value next build — it turns CrewForge from "design + run" into "design, run, *and measure*".
+2. **CrewAI Flows / multi-crew orchestration**. Today a workspace = one crew. Flows are CrewAI's event-driven layer: chain crews, branch on outputs (`@router`), loop, fan-out. A second canvas type ("Flow") that wires crews together is the biggest product expansion — it's the jump from "a team" to "a pipeline of teams". Large: new spec model, new exporter path, new run semantics.
+3. **Run history & analytics**. The data exists (runs carry status/tokens/cost/trigger/batch_id). Build a reporting layer: cost-over-time, success-rate, token trends, per-workflow and per-batch rollups, slowest tasks. Natural pairing with eval (#1) for tracking quality over time.
+4. **Versioning & diff**. Workspace version snapshots, visual diff between versions, rollback — then "compare v1 vs v2 on the same eval set" closes the loop with the Quality suite.
+5. **Durability & scale** (only if outgrowing single-user-local). Run execution is in-process threads + SQLite; a crash loses in-flight runs and the scheduler has no missed-window catch-up. Phase: move runs to a worker queue (RQ/Celery), optional Postgres backend, durable/replayed schedules. Pairs with a **multi-user** fork (auth, per-user workspaces, RBAC) — note this changes the security posture (currently the webhook token is the only auth surface).
+6. **Deployment targets** beyond the zip export: one-click Docker image of a generated crew, scheduled cloud run, or CrewAI Enterprise push. The exporter already emits a clean, runnable project — packaging is the remaining step.
 
 ## References
 - Full design + phase history: `/Users/arthur/.claude/plans/system-design-see-the-crew-cheerful-lake.md` (PLAN v4 section = knowledge graph + this roadmap).
