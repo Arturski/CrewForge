@@ -17,6 +17,12 @@
 
 ---
 
+<p align="center">
+  <img src="docs/assets/screenshot.png" alt="CrewForge — Runs page" width="900"/>
+</p>
+
+---
+
 ## What is CrewForge?
 
 CrewForge is a **self-hosted, no-code studio** that puts a visual front door on [CrewAI](https://github.com/crewAIInc/crewAI). Design a multi-agent crew in the browser, run it live, watch events stream in real-time, then export a clean, idiomatic Python project you own completely.
