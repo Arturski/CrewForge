@@ -55,9 +55,10 @@ CrewForge is a self-hosted, open-source visual studio for [CrewAI](https://githu
 
 ## 🔜 Near-term
 
-1. **Eval history & trend** — pass-rate and cost over time per workflow (records already persist; needs a reporting view)
-2. **Onboarding tour** — first-run guided walkthrough: build → dry-run → observe → go live
-3. **Inline MCP marketplace drawer** — add + attach an MCP server without leaving the Builder canvas
+1. **Custom tools / skill library** — define a reusable tool in the browser (name, description, Python body or HTTP call), save it to a personal library, attach to any agent or workflow. Today custom tools require exporting and editing code manually; this closes the gap. Workaround: wrap custom logic as an MCP server.
+2. **Eval history & trend** — pass-rate and cost over time per workflow (records already persist; needs a reporting view)
+3. **Onboarding tour** — first-run guided walkthrough: build → dry-run → observe → go live
+4. **Inline MCP marketplace drawer** — add + attach an MCP server without leaving the Builder canvas
 
 ---
 
