@@ -5,13 +5,11 @@ Private repos are out of scope for Phase 2.
 """
 from __future__ import annotations
 
-import io
 import re
 import tarfile
 import urllib.request
 
 _TIMEOUT = 60
-_MAX_TARBALL = 80_000_000  # 80MB compressed cap
 _MAX_FILE = 200_000  # bytes of text per file
 _MAX_FILES = 400
 _UA = "CrewForge/0.2 (knowledge ingestion; self-hosted)"
@@ -36,40 +34,55 @@ def parse_repo_url(url: str) -> tuple[str, str, str]:
 
 
 def fetch_repo(url: str, on_progress=None) -> list[tuple[str, str]]:
-    """Download the repo tarball and return [(path, text)] for ingestable files."""
+    """Download the repo tarball and return [(path, text)] for ingestable files.
+
+    Uses streaming tarfile extraction (r|gz) directly from the HTTP response so
+    we never load the full tarball into memory — fixes EOFError on repos > 80 MB.
+    Stops early once _MAX_FILES text files have been collected.
+    """
     owner, repo, ref = parse_repo_url(url)
     tar_url = f"https://codeload.github.com/{owner}/{repo}/tar.gz/{ref}"
     req = urllib.request.Request(tar_url, headers={"User-Agent": _UA})
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-        blob = resp.read(_MAX_TARBALL)
 
     docs: list[tuple[str, str]] = []
-    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tf:
-        members = [m for m in tf.getmembers() if m.isfile()]
-        candidates = []
-        for m in members:
-            # strip the "{repo}-{sha}/" prefix codeload adds
-            path = m.name.split("/", 1)[1] if "/" in m.name else m.name
-            parts = path.split("/")
-            if any(p in _SKIP_DIRS for p in parts) or parts[-1] in _SKIP_FILES:
-                continue
-            name = parts[-1].lower()
-            if not any(name.endswith(ext) for ext in _TEXT_EXTS) and name not in ("readme", "license", "makefile", "dockerfile"):
-                continue
-            if m.size > _MAX_FILE * 4:  # way too big even before decode
-                continue
-            candidates.append((m, path))
-        candidates = candidates[:_MAX_FILES]
-        for i, (m, path) in enumerate(candidates):
-            f = tf.extractfile(m)
-            if f is None:
-                continue
-            raw = f.read(_MAX_FILE)
-            if b"\x00" in raw[:1024]:  # binary masquerading as text
-                continue
-            text = raw.decode("utf-8", errors="ignore").strip()
-            if text:
-                docs.append((f"{owner}/{repo}:{path}", text))
-            if on_progress and (i % 20 == 0 or i == len(candidates) - 1):
-                on_progress(i + 1, len(candidates))
+    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+        # r|gz = streaming (non-seekable) mode; decompresses on the fly.
+        # tf.members must be cleared after each entry or memory accumulates.
+        with tarfile.open(fileobj=resp, mode="r|gz") as tf:
+            for m in tf:
+                if not m.isfile():
+                    tf.members = []
+                    continue
+                # strip the "{repo}-{sha}/" prefix codeload adds
+                path = m.name.split("/", 1)[1] if "/" in m.name else m.name
+                parts = path.split("/")
+                if any(p in _SKIP_DIRS for p in parts) or parts[-1] in _SKIP_FILES:
+                    tf.members = []
+                    continue
+                name = parts[-1].lower()
+                if not any(name.endswith(ext) for ext in _TEXT_EXTS) and \
+                        name not in ("readme", "license", "makefile", "dockerfile"):
+                    tf.members = []
+                    continue
+                if m.size > _MAX_FILE * 4:
+                    tf.members = []
+                    continue
+                f = tf.extractfile(m)
+                if f is None:
+                    tf.members = []
+                    continue
+                raw = f.read(_MAX_FILE)
+                tf.members = []
+                if b"\x00" in raw[:1024]:  # binary masquerading as text
+                    continue
+                text = raw.decode("utf-8", errors="ignore").strip()
+                if text:
+                    docs.append((f"{owner}/{repo}:{path}", text))
+                    if on_progress and (len(docs) % 20 == 0):
+                        on_progress(len(docs), len(docs))
+                if len(docs) >= _MAX_FILES:
+                    break
+
+    if on_progress and docs:
+        on_progress(len(docs), len(docs))
     return docs
