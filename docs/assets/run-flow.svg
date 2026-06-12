@@ -1,0 +1,84 @@
+<svg viewBox="0 0 920 200" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <rect width="920" height="200" fill="#f8fafc" rx="12"/>
+  <text x="460" y="28" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">Run Execution Lifecycle</text>
+
+  <!-- Step boxes -->
+  <!-- 1: Builder -->
+  <rect x="20"  y="50" width="110" height="80" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="75"  y="81" text-anchor="middle" font-size="10" font-weight="700" fill="#1d4ed8">Builder</text>
+  <text x="75"  y="96" text-anchor="middle" font-size="8.5" fill="#3b82f6">Workspace spec</text>
+  <text x="75" y="110" text-anchor="middle" font-size="8.5" fill="#3b82f6">inputs · dry-run</text>
+  <text x="75" y="124" text-anchor="middle" font-size="8.5" fill="#3b82f6">toggle</text>
+
+  <!-- Arrow -->
+  <line x1="130" y1="90" x2="154" y2="90" stroke="#94a3b8" stroke-width="1.5"/>
+  <polygon points="150,85 160,90 150,95" fill="#94a3b8"/>
+  <text x="142" y="82" text-anchor="middle" font-size="7.5" fill="#64748b">POST</text>
+  <text x="142" y="104" text-anchor="middle" font-size="7.5" fill="#64748b">/api/runs</text>
+
+  <!-- 2: RunManager -->
+  <rect x="160" y="50" width="120" height="80" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/>
+  <text x="220" y="78" text-anchor="middle" font-size="10" font-weight="700" fill="#c2410c">RunManager</text>
+  <text x="220" y="93" text-anchor="middle" font-size="8.5" fill="#ea580c">run record created</text>
+  <text x="220" y="107" text-anchor="middle" font-size="8.5" fill="#ea580c">cancel event set</text>
+  <text x="220" y="121" text-anchor="middle" font-size="8.5" fill="#ea580c">background thread</text>
+
+  <!-- Arrow -->
+  <line x1="280" y1="90" x2="304" y2="90" stroke="#94a3b8" stroke-width="1.5"/>
+  <polygon points="300,85 310,90 300,95" fill="#94a3b8"/>
+
+  <!-- 3: Compiler/Adapter -->
+  <rect x="310" y="50" width="130" height="80" rx="8" fill="#faf5ff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="375" y="74" text-anchor="middle" font-size="10" font-weight="700" fill="#6d28d9">Compiler</text>
+  <text x="375" y="88" text-anchor="middle" font-size="8.5" fill="#7c3aed">spec → Crew/Agents</text>
+  <text x="375" y="102" text-anchor="middle" font-size="8.5" fill="#7c3aed">attach tools · KBs</text>
+  <text x="375" y="116" text-anchor="middle" font-size="8.5" fill="#7c3aed">resolve LLMs · MCPs</text>
+  <text x="375" y="130" text-anchor="middle" font-size="8.5" fill="#a78bfa">FakeLLM if dry-run</text>
+
+  <!-- Arrow -->
+  <line x1="440" y1="90" x2="464" y2="90" stroke="#94a3b8" stroke-width="1.5"/>
+  <polygon points="460,85 470,90 460,95" fill="#94a3b8"/>
+
+  <!-- 4: CrewAI kickoff -->
+  <rect x="470" y="50" width="130" height="80" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/>
+  <text x="535" y="74" text-anchor="middle" font-size="10" font-weight="700" fill="#c2410c">CrewAI</text>
+  <text x="535" y="88" text-anchor="middle" font-size="8.5" fill="#ea580c">crew.kickoff(inputs)</text>
+  <text x="535" y="102" text-anchor="middle" font-size="8.5" fill="#ea580c">agent loops · tools</text>
+  <text x="535" y="116" text-anchor="middle" font-size="8.5" fill="#ea580c">HITL gates</text>
+  <text x="535" y="130" text-anchor="middle" font-size="8.5" fill="#ea580c">events emitted</text>
+
+  <!-- Arrow -->
+  <line x1="600" y1="90" x2="624" y2="90" stroke="#94a3b8" stroke-width="1.5"/>
+  <polygon points="620,85 630,90 620,95" fill="#94a3b8"/>
+
+  <!-- 5: EventListener -->
+  <rect x="630" y="50" width="130" height="80" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="695" y="74" text-anchor="middle" font-size="10" font-weight="700" fill="#15803d">EventListener</text>
+  <text x="695" y="88" text-anchor="middle" font-size="8.5" fill="#16a34a">normalize events</text>
+  <text x="695" y="102" text-anchor="middle" font-size="8.5" fill="#16a34a">→ SQLite store</text>
+  <text x="695" y="116" text-anchor="middle" font-size="8.5" fill="#16a34a">→ SSE broadcast</text>
+  <text x="695" y="130" text-anchor="middle" font-size="8.5" fill="#22c55e">cost accumulation</text>
+
+  <!-- Arrow -->
+  <line x1="760" y1="90" x2="784" y2="90" stroke="#94a3b8" stroke-width="1.5"/>
+  <polygon points="780,85 790,90 780,95" fill="#94a3b8"/>
+
+  <!-- 6: Browser timeline -->
+  <rect x="790" y="50" width="110" height="80" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="845" y="78" text-anchor="middle" font-size="10" font-weight="700" fill="#1d4ed8">Runs Page</text>
+  <text x="845" y="93" text-anchor="middle" font-size="8.5" fill="#3b82f6">live timeline</text>
+  <text x="845" y="107" text-anchor="middle" font-size="8.5" fill="#3b82f6">canvas glow</text>
+  <text x="845" y="121" text-anchor="middle" font-size="8.5" fill="#3b82f6">cost · HITL panel</text>
+
+  <!-- Bottom labels -->
+  <text x="75"  y="165" text-anchor="middle" font-size="8" fill="#94a3b8">1. User</text>
+  <text x="220" y="165" text-anchor="middle" font-size="8" fill="#94a3b8">2. API layer</text>
+  <text x="375" y="165" text-anchor="middle" font-size="8" fill="#94a3b8">3. Compile</text>
+  <text x="535" y="165" text-anchor="middle" font-size="8" fill="#94a3b8">4. Execute</text>
+  <text x="695" y="165" text-anchor="middle" font-size="8" fill="#94a3b8">5. Observe</text>
+  <text x="845" y="165" text-anchor="middle" font-size="8" fill="#94a3b8">6. Display</text>
+
+  <!-- Loop annotation -->
+  <path d="M 845 130 Q 845 175 460 175 Q 75 175 75 50" fill="none" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="460" y="188" text-anchor="middle" font-size="8" fill="#94a3b8">persistent history · replay · batch · eval reuse</text>
+</svg>
