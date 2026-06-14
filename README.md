@@ -6,6 +6,7 @@
 
 <p>Build multi-agent workflows in the browser · Run with live observability · Export clean Python · No lock-in</p>
 
+[![CI](https://github.com/Arturski/CrewForge/actions/workflows/ci.yml/badge.svg)](https://github.com/Arturski/CrewForge/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
 [![CrewAI](https://img.shields.io/badge/crewai-1.14%2B-orange)](https://github.com/crewAIInc/crewAI)
